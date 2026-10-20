@@ -391,16 +391,16 @@ panoramas = [
     ("Site 3 Custom (720p)", "output/site3/pano_small.jpg")
 ]
 
-plt.figure(figsize=(14, 8), dpi=100)
+plt.figure(figsize=(10, 6), dpi=75)
 idx = 1
 for title, p in panoramas:
     if os.path.isfile(p):
         img = Image.open(p)
         preview = img.copy()
-        preview.thumbnail((960, 540))
+        preview.thumbnail((480, 270))
         plt.subplot(2, 2, idx)
         plt.imshow(preview)
-        plt.title(f"{title}\\n({img.width}x{img.height})", fontsize=10, fontweight='bold')
+        plt.title(f"{title}\\n({img.width}x{img.height})", fontsize=9, fontweight='bold')
         plt.axis('off')
         idx += 1
 
