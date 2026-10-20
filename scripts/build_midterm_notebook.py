@@ -154,9 +154,17 @@ else:
     print(f"[OK] Working directory is already at project root: {os.getcwd()}")
 """))
 
-    cells.append(nbf.v4.new_code_cell("""# 2.2 Verify GPU specifications and NVCC compiler
-!nvidia-smi
-!nvcc --version
+    cells.append(nbf.v4.new_code_cell("""# 2.2 Verify GPU / CPU Hardware specifications and Compilers
+import shutil
+
+if shutil.which("nvidia-smi"):
+    print("[CUDA GPU Runtime Detected]")
+    !nvidia-smi
+    !nvcc --version
+else:
+    print("[Host CPU Runtime Detected - Standard environment for V0 Sequential CPU Baseline]")
+    !lscpu | grep "Model name\\|Socket\\|Thread\\|NUMA\\|CPU(s)" || cat /proc/cpuinfo | grep "model name" | head -n 4
+    !g++ --version
 """))
 
     cells.append(nbf.v4.new_code_cell("""# 2.3 Install required Python telemetry and validation libraries
@@ -282,8 +290,9 @@ for res in ["small", "medium", "large"]:
     rmse = np.sqrt(np.mean(np.sum((pts_B_est - pts_B_gt) ** 2, axis=1)))
     norm_rmse_pct = (rmse / diag) * 100.0
     
-    # Plan v4 Quality Gate A: Small RMSE <= 1.5 px and Norm RMSE <= 0.1% of diagonal
-    gate_status = "PASS (<= 1.5 px & <= 0.1%)" if (rmse <= 1.5 and norm_rmse_pct <= 0.1) else "CHECK TOLERANCE"
+    # Plan v4 Quality Gate A: Small RMSE <= 1.5 px and Norm RMSE <= 0.1% of diagonal across all resolutions
+    is_passed = (rmse <= 1.5 and norm_rmse_pct <= 0.1) if res == "small" else (norm_rmse_pct <= 0.1)
+    gate_status = f"PASS ({'<= 1.5 px & ' if res == 'small' else ''}<= 0.1% diag)" if is_passed else "CHECK TOLERANCE"
     print(f"{res:<12} | {rmse:<16.4f} | {norm_rmse_pct:<22.4f}% | {gate_status}")
 
 print("=" * 80)
