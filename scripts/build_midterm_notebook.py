@@ -40,7 +40,7 @@ def create_midterm_notebook():
 > **Milestone:** Midterm Submission (Quality Gate B — Conforming to Project Plan v4)  
 > **Group:** Group 19  
 > **Target Environment:** Google Colab (NVIDIA Tesla T4 GPU, CUDA 12.x, C++17)  
-> **Source Repository:** Single-source codebase located in `src/`  
+> **Source Repository:** [GitHub Repository (thong7d/Panorama-Stitching)](https://github.com/thong7d/Panorama-Stitching)  
 > **Dataset Archive:** [Google Drive Dataset Folder](https://drive.google.com/drive/folders/1vnD51fqHjY-HGqp365dTa1SX_0femIwG?usp=drive_link)  
 
 ---
@@ -133,16 +133,37 @@ According to **Project Plan v4 Section 3**, the following parameters and convent
 ## 2. ENVIRONMENT SETUP & HARDWARE VERIFICATION
 """))
 
-    cells.append(nbf.v4.new_code_cell("""# 2.1 Verify GPU specifications and NVCC compiler
+    cells.append(nbf.v4.new_code_cell("""# 2.1 Automatically clone repository and set working directory if running in Google Colab
+import os
+
+REPO_URL = "https://github.com/thong7d/Panorama-Stitching.git"
+REPO_DIR = "Panorama-Stitching"
+
+# Check if we are already inside the repository root
+if not os.path.exists("src/common.h"):
+    if not os.path.exists(REPO_DIR):
+        print(f"[INFO] Cloning repository from {REPO_URL}...")
+        !git clone {REPO_URL}
+    
+    if os.path.exists(REPO_DIR):
+        %cd {REPO_DIR}
+        print(f"[OK] Working directory successfully set to: {os.getcwd()}")
+    else:
+        raise FileNotFoundError(f"[Error] Repository directory '{REPO_DIR}' not found.")
+else:
+    print(f"[OK] Working directory is already at project root: {os.getcwd()}")
+"""))
+
+    cells.append(nbf.v4.new_code_cell("""# 2.2 Verify GPU specifications and NVCC compiler
 !nvidia-smi
 !nvcc --version
 """))
 
-    cells.append(nbf.v4.new_code_cell("""# 2.2 Install required Python telemetry and validation libraries
+    cells.append(nbf.v4.new_code_cell("""# 2.3 Install required Python telemetry and validation libraries
 !pip install -q pillow pillow-heif numpy opencv-python-headless matplotlib nbformat pandas
 """))
 
-    cells.append(nbf.v4.new_code_cell("""# 2.3 Verify repository directory structure and source files
+    cells.append(nbf.v4.new_code_cell("""# 2.4 Verify repository directory structure and source files
 import os
 import sys
 
@@ -157,7 +178,7 @@ missing = [p for p in required_paths if not os.path.exists(p)]
 if missing:
     raise FileNotFoundError(f"Missing required project files: {missing}")
 
-print("[OK] All required workspace files are verified.")
+print(f"[OK] All required workspace files are verified in {os.getcwd()}.")
 """))
 
     # Section 3: Dataset Preparation & Preprocessing
@@ -394,12 +415,11 @@ Following **Project Plan v4 Section 1.2**: No optimizations will be chosen by gu
 
     # Save to file
     nb.cells = cells
-    for fname in ["Group19_Midterm.ipynb", "GroupXX_Midterm.ipynb"]:
-        out_path = Path("notebooks") / fname
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_path, "w", encoding="utf-8") as f:
-            nbf.write(nb, f)
-        print(f"[OK] Midterm notebook successfully created at: {out_path} ({len(cells)} cells)")
+    out_path = Path("notebooks") / "Group19_Midterm.ipynb"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        nbf.write(nb, f)
+    print(f"[OK] Midterm notebook successfully created at: {out_path} ({len(cells)} cells)")
 
 if __name__ == "__main__":
     create_midterm_notebook()

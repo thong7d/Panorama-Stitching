@@ -133,15 +133,14 @@ def test_preprocessed_images_exist():
             assert right_img.is_file(), f"Missing {right_img}"
             
 def test_midterm_notebook_validity():
-    print("[Python Test 5] Checking Midterm notebook validity with nbformat...")
+    print("[Python Test 5] Checking Group19_Midterm.ipynb validity with nbformat...")
     import nbformat
-    for fname in ["Group19_Midterm.ipynb", "GroupXX_Midterm.ipynb"]:
-        nb_path = WORKSPACE_ROOT / "notebooks" / fname
-        assert nb_path.is_file(), f"Notebook file not found at: {nb_path}"
-        with open(nb_path, "r", encoding="utf-8") as f:
-            nb = nbformat.read(f, as_version=4)
-        assert len(nb.cells) >= 20, f"Expected at least 20 cells in {fname}, got {len(nb.cells)}"
-        print(f"  -> {fname} parsed successfully with {len(nb.cells)} cells (PASS)")
+    nb_path = WORKSPACE_ROOT / "notebooks" / "Group19_Midterm.ipynb"
+    assert nb_path.is_file(), f"Notebook file not found at: {nb_path}"
+    with open(nb_path, "r", encoding="utf-8") as f:
+        nb = nbformat.read(f, as_version=4)
+    assert len(nb.cells) >= 20, f"Expected at least 20 cells in Group19_Midterm.ipynb, got {len(nb.cells)}"
+    print(f"  -> Group19_Midterm.ipynb parsed successfully with {len(nb.cells)} cells (PASS)")
 
 if __name__ == "__main__":
     print("=========================================================")
