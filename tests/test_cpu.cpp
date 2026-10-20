@@ -60,23 +60,25 @@ void test_raii_contracts() {
     {
         Image img;
         assert(img.empty());
-        img.allocate(64, 48, 3);
+        img.allocate(64, 48);
         assert(!img.empty());
-        assert(img.w == 64 && img.h == 48 && img.c == 3);
-        img.data[0] = 123;
+        assert(img.w == 64 && img.h == 48);
+        img.data[0] = make_uchar4(12, 34, 56, 255);
 
         // Move constructor
         Image moved(std::move(img));
         assert(img.empty());
         assert(img.data == nullptr);
         assert(!moved.empty());
-        assert(moved.w == 64 && moved.h == 48 && moved.data[0] == 123);
+        assert(moved.w == 64 && moved.h == 48);
+        assert(moved.data[0].x == 12 && moved.data[0].y == 34 && moved.data[0].z == 56 && moved.data[0].w == 255);
 
         // Move assignment
         Image assigned;
         assigned = std::move(moved);
         assert(moved.empty());
-        assert(assigned.w == 64 && assigned.data[0] == 123);
+        assert(assigned.w == 64);
+        assert(assigned.data[0].x == 12 && assigned.data[0].y == 34 && assigned.data[0].z == 56 && assigned.data[0].w == 255);
 
         // Idempotent free
         assigned.free();

@@ -13,10 +13,10 @@ NVCC ?= nvcc
 CXX ?= g++
 
 # NVCC compiler flags for Tesla T4 (Turing, Compute Capability 7.5)
-NVCC_FLAGS = -O3 -arch=sm_75 -std=c++17 -Xcompiler -Wall,-Wextra
+NVCC_FLAGS = -O3 -arch=sm_75 -std=c++17 -Xcompiler -Wall,-Wextra,-Wno-missing-field-initializers
 
 # CPU host compiler flags
-CXX_FLAGS = -O3 -std=c++17 -Wall -Wextra
+CXX_FLAGS = -O3 -std=c++17 -Wall -Wextra -Wno-missing-field-initializers
 
 SRCS = src/main.cu src/stb_impl.cpp src/v0_sequential.cpp
 TARGET = stitch
