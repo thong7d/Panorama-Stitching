@@ -1,0 +1,51 @@
+{
+  "project": "CSC14120 - Panorama Image Stitching",
+  "aspect_ratio": "16:9",
+  "resolutions": {
+    "small": [1280, 720],
+    "medium": [1920, 1080],
+    "large": [3840, 2160]
+  },
+  "drive_url": "https://drive.google.com/drive/folders/1vnD51fqHjY-HGqp365dTa1SX_0femIwG?usp=drive_link",
+  "pairs": [
+    {
+      "id": "site1_indoor",
+      "kind": "standard",
+      "directory": "dataset/site1_indoor",
+      "left_raw": "In1.png",
+      "right_raw": "In2.png",
+      "description": "Indoor classroom and hallway scene with distinct geometric lines and controlled lighting"
+    },
+    {
+      "id": "site2_outdoor",
+      "kind": "standard",
+      "directory": "dataset/site2_outdoor",
+      "left_raw": "out1.png",
+      "right_raw": "out2.png",
+      "description": "Outdoor campus plaza scene with natural sunlight, distant buildings, and pavement textures"
+    },
+    {
+      "id": "site3_custom",
+      "kind": "standard",
+      "directory": "dataset/site3_custom",
+      "left_raw": "cus1.png",
+      "right_raw": "cus2.png",
+      "description": "Custom site scene featuring architectural elements and high-frequency corner details"
+    },
+    {
+      "id": "challenging",
+      "kind": "challenging",
+      "directory": "dataset/challenging",
+      "left_raw": "Cha1.png",
+      "right_raw": "Cha2.png",
+      "description": "Challenging scene with dynamic lighting, reflections, and perspective deformation for failure analysis"
+    },
+    {
+      "id": "provided",
+      "kind": "provided",
+      "directory": "dataset/provided",
+      "status": "external_blocker",
+      "description": "Instructor-provided benchmark dataset from course LMS. Marked as external blocker for Final Gallery."
+    }
+  ]
+}

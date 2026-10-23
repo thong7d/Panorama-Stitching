@@ -1,0 +1,37 @@
+# Python environment & cache
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# C++/CUDA build targets & binaries
+stitch
+test_cpu
+*.exe
+*.o
+*.obj
+*.exp
+*.lib
+*.pdb
+
+# Pipeline run outputs & submission archives
+output/
+*.zip
+*.tar.gz
+
+# IDE & OS metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+
+# Large raw camera formats (hosted on Google Drive)
+dataset/*/*.heic
+
+# Reference textbooks (hosted on Google Drive)
+Szeliski_*.pdf
+Nayar,*.pdf

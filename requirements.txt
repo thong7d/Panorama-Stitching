@@ -1,0 +1,8 @@
+# CSC14120 - Parallel Programming
+# Dependencies for Dataset Preprocessing, Synthetic Ground Truth, and Colab Notebooks
+numpy>=1.24.0
+pillow>=10.0.0
+pillow-heif>=0.14.0
+opencv-python-headless>=4.8.0
+matplotlib>=3.7.0
+nbformat>=5.9.0
