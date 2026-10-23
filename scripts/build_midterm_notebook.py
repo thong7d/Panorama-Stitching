@@ -37,15 +37,15 @@ def create_midterm_notebook():
     # Title & Header
     cells.append(nbf.v4.new_markdown_cell(r"""# CSC14120 — PARALLEL PROGRAMMING: MIDTERM REPORT
 ## Project: CUDA-Accelerated Panorama Image Stitching
-> **Milestone:** Midterm Submission (Quality Gate B — Conforming to Project Plan v4)
+> **Milestone:** Midterm Submission — Proposal and Sequential Version (Week 7)
 > **Group:** Group 19
 > **Target Environment:** Google Colab (NVIDIA Tesla T4 GPU, CUDA 12.x, C++17)
-> **Source Repository:** [GitHub Repository (thong7d/Panorama-Stitching)](https://github.com/thong7d/Panorama-Stitching)
+> **Source Repository:** [GitHub — thong7d/Panorama-Stitching](https://github.com/thong7d/Panorama-Stitching)
 > **Dataset Archive:** [Google Drive Dataset Folder](https://drive.google.com/drive/folders/1vnD51fqHjY-HGqp365dTa1SX_0femIwG?usp=drive_link)
 
 ---
 
-### 3.1 TEAM MEMBERS AND WORKLOAD ALLOCATION
+## 1. TEAM INFORMATION & WORK PLAN
 
 | No. | Full Name | Student ID | Stage Responsibilities |
 |:---:|---|:---:|---|
@@ -64,14 +64,14 @@ def create_midterm_notebook():
 | **V4** | Optimization: `__constant__` ORB table + texture (S3, S6) | Thong | Tuan | Week 13 |
 """))
 
-    # Section 1: Problem Understanding & Pipeline Architecture
+    # Section 2: Problem Understanding & Pipeline Architecture
     cells.append(nbf.v4.new_markdown_cell(r"""---
-## 3.2 PROBLEM UNDERSTANDING & PIPELINE ARCHITECTURE
+## 2. PROBLEM UNDERSTANDING & PIPELINE ARCHITECTURE
 
-### Objective
+### 2.1 Objective
 Stitch two overlapping static images (30–50% overlap, single nodal point rotation) into a seamless wide-angle panorama in the coordinate frame of the left image (Image A).
 
-### Six-Stage Pipeline & Data-Flow Architecture
+### 2.1 Six-Stage Pipeline & Data-Flow Architecture
 
 ```text
 [Input Image A (RGB)]                       [Input Image B (RGB)]
@@ -117,13 +117,13 @@ Stitch two overlapping static images (30–50% overlap, single nodal point rotat
                  [Panorama Output Image]
 ```
 
-### 3.3 Chosen Methods, Parameters & GPU Suitability
+### 2.2 Chosen Methods, Parameters & GPU Suitability (§3.3)
 
 | Stage | Algorithm / Method | Key Parameters | GPU Suitability |
 |---|---|---|---|
 | **Stage 1** | 2D 5×5 Gaussian blur (σ≈1.04) | boundary clamping; Y=0.299R+0.587G+0.114B | 1 thread/pixel — embarrassingly parallel; ideal for shared memory tiling |
 | **Stage 2** | FAST-9 + 3×3 NMS + Deterministic Top-K | T=20; K=1000; sort: (response DESC, idx ASC) | 1 thread/pixel for detection; `thrust::sort_by_key` for Top-K |
-| **Stage 3** | Oriented BRIEF / ORB 256-bit | 31×31 patch; 256 pairs from OpenCV `bit_pattern_31_`; border R<20px | 1 thread/keypoint; `__constant__` memory for 256-pair table |
+| **Stage 3** | Oriented BRIEF / ORB 256-bit | 31×31 patch; 256 pairs from OpenCV `bit_pattern_31_`; border R<20px; orientation via Intensity Centroid (used for descriptor rotation only, not stored in `Keypoint.angle`) | 1 thread/keypoint; `__constant__` memory for 256-pair table |
 | **Stage 4** | Brute-force Hamming + Lowe's ratio test | dist₁ < 0.75×dist₂; 8×`uint32_t` popcount | Hardware `__popc`; warp-level reduction for inner loop |
 | **Stage 5** | RANSAC + Hartley normalized 4-point DLT | 2000 hypotheses; reprojection ≤3.0 px; LCG seed=42 | 2000 parallel hypothesis evaluations; warp-shuffle inlier counting |
 | **Stage 6** | Inverse warp + bilinear + feathering | frame A coords; symmetric dist-to-border blend | 1 thread/canvas pixel; texture unit for bilinear cache |
@@ -131,9 +131,9 @@ Stitch two overlapping static images (30–50% overlap, single nodal point rotat
 **Parameter justification:** FAST T=20 balances recall vs. false positives on synthetic and real scenes; K=1000 keeps Stage 4 matching tractable (1000×1000 Hamming comparisons); RANSAC 2000 iterations achieves >99% success probability for 30% inlier ratio; Lowe ratio 0.75 is standard for robustness against ambiguous descriptors.
 """))
 
-    # Section 2: Environment Setup & Hardware Verification
+    # Section 3: Environment Setup & Hardware Verification
     cells.append(nbf.v4.new_markdown_cell(r"""---
-## 2. ENVIRONMENT SETUP & HARDWARE VERIFICATION
+## 3. ENVIRONMENT SETUP & HARDWARE VERIFICATION
 """))
 
     cells.append(nbf.v4.new_code_cell("""# 2.1 Copy src/ from the team's shared Google Drive folder and set working directory
@@ -209,9 +209,9 @@ if missing:
 print(f"[OK] All required workspace files are verified in {os.getcwd()}.")
 """))
 
-    # Section 3: Dataset Preparation & Preprocessing
+    # Section 4: Dataset Preparation & Preprocessing
     cells.append(nbf.v4.new_markdown_cell(r"""---
-## 3.6 EXPERIMENTAL DATASET & PREPROCESSING (16:9 STANDARDIZATION)
+## 4. EXPERIMENTAL DATASET & PREPROCESSING (§3.6)
 The project utilizes 3 real-world image pairs across diverse environments, 1 challenging pair, plus 1 synthetic ground-truth pair:
 - **Aspect Ratio:** Standard 16:9 (center-cropped).
 - **Three Standard Resolutions:** Small 1280×720 (720p), Medium 1920×1080 (1080p), Large 3840×2160 (4K).
@@ -227,9 +227,9 @@ The project utilizes 3 real-world image pairs across diverse environments, 1 cha
 !python scripts/generate_synthetic_test.py
 """))
 
-    # Section 4: Compilation & Quality Gate A
+    # Section 5: Compilation & Quality Gate A
     cells.append(nbf.v4.new_markdown_cell(r"""---
-## 4. COMPILATION & QUALITY GATE A (UNIT & INTEGRATION TESTS)
+## 5. V0 SEQUENTIAL BASELINE — COMPILATION & TESTS (§3.4)
 """))
 
     cells.append(nbf.v4.new_code_cell("""# 4.1 Run Python Integration Tests (Manifest, Synthetic GT, Preprocessed Images)
@@ -248,11 +248,11 @@ else:
 !make test
 """))
 
-    # Section 5: Benchmark Execution
+    # Section 6: Benchmark Execution
     cells.append(nbf.v4.new_markdown_cell(r"""---
-## 3.5 BENCHMARK EXECUTION & TELEMETRY COLLECTION
-Execute V0 sequential pipeline on all 3 resolutions (720p, 1080p, 4K) across synthetic and real sites.
-Each test runs **5 iterations** with 1 warmup run (Plan v4 Section 4.4). Reporting both Avg and Min to capture stable performance.
+## 6. BENCHMARK EXECUTION & TELEMETRY COLLECTION (§3.5)
+V0 sequential pipeline on all 3 resolutions (720p, 1080p, 4K) across all sites.
+Each run: **5 iterations** + 1 warmup (Plan v4 §4.4). Reports Avg and Min.
 """))
 
     cells.append(nbf.v4.new_code_cell("""# 5.1 Initialize output directories for panoramas and JSON telemetry
@@ -287,9 +287,9 @@ Each test runs **5 iterations** with 1 warmup run (Plan v4 Section 4.4). Reporti
 !./stitch dataset/challenging/left_large.jpg  dataset/challenging/right_large.jpg  output/challenging/pano_large.jpg  --version 0 --runs 5 --metrics-json output/challenging/metrics_large.json
 """))
 
-    # Section 6: Results Analysis, Tables & Plots
+    # Section 7: Results Analysis, Tables & Plots
     cells.append(nbf.v4.new_markdown_cell(r"""---
-## 6. RESULTS ANALYSIS, GEOMETRIC ACCURACY & AMDAHL'S LAW
+## 7. RESULTS ANALYSIS, GEOMETRIC ACCURACY & AMDAHL'S LAW (§3.5)
 """))
 
     cells.append(nbf.v4.new_code_cell("""# 6.1 Geometric Accuracy Evaluation on Synthetic Dataset (Projected Grid RMSE)
@@ -410,7 +410,7 @@ print("[OK] Bottleneck chart saved to output/bottleneck_breakdown.png")
 """))
 
     # F5: Hot stages written analysis
-    cells.append(nbf.v4.new_markdown_cell(r"""### 3.5 Hot Stages Analysis
+    cells.append(nbf.v4.new_markdown_cell(r"""### 7.4 Hot Stages Analysis
 
 Based on the per-stage timing data above, the following patterns are observed:
 
@@ -468,9 +468,9 @@ for res, path in [("Small (720p)", "output/synthetic/metrics_small.json"),
 print('=' * 60)
 """))
 
-    # Section 7: Visual Gallery of Results
+    # Section 8: Visual Gallery of Results
     cells.append(nbf.v4.new_markdown_cell(r"""---
-## 7. VISUAL GALLERY OF STITCHED PANORAMAS
+## 8. VISUAL GALLERY OF STITCHED PANORAMAS (§3.5)
 """))
 
     cells.append(nbf.v4.new_code_cell("""# 7.1 Display stitched panorama outputs
@@ -508,9 +508,9 @@ plt.tight_layout()
 plt.show()
 """))
 
-    # Section 8: GPU Implementation Plan (V1 to V3)
+    # Section 9: GPU Implementation Plan (V1 to V3)
     cells.append(nbf.v4.new_markdown_cell(r"""---
-## 3.7 GPU IMPLEMENTATION PLAN (PHASES C, D, E)
+## 9. GPU IMPLEMENTATION PLAN (§3.7)
 
 ### Which Stages to GPU-Accelerate and Why
 
@@ -551,9 +551,9 @@ All 6 stages will be ported to GPU in V1 to keep all intermediate data resident 
 | RANSAC non-determinism with GPU atomics | S5 | Use deterministic LCG seed=42 per thread index; validate against V0 on synthetic |
 """))
 
-    # Section 9: References
+    # Section 10: References
     cells.append(nbf.v4.new_markdown_cell(r"""---
-## 9. REFERENCES & EXTERNAL SOURCES
+## 10. REFERENCES & EXTERNAL SOURCES
 
 1. **OpenCV ORB `bit_pattern_31_`** — 256-pair binary test pattern used in Stage 3.
    Ethan Rublee et al., *ORB: An efficient alternative to SIFT or SURF*, ICCV 2011.
