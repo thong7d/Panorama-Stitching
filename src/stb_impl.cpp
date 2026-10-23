@@ -1,3 +1,12 @@
+// ============================================================================
+// CSC14120 - Parallel Programming
+// Project: Panorama Image Stitching
+// Module: Image I/O Implementation using stb_image / stb_image_write
+// Authors: Pham Minh Thong (23120364), Nguyen Le Tan Tien (23120369), Dao Quoc Tuan (23120392)
+// External sources: stb_image.h / stb_image_write.h — public domain, Sean T. Barrett
+//   (https://github.com/nothings/stb, MIT / Unlicense)
+// ============================================================================
+
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"

@@ -2,7 +2,7 @@
 // CSC14120 - Parallel Programming
 // Project: Panorama Image Stitching
 // Module: Main CLI Entrypoint (Plan v4 Section 4.1)
-// Authors: GroupXX (Members A, B, C)
+// Authors: Pham Minh Thong (23120364), Nguyen Le Tan Tien (23120369), Dao Quoc Tuan (23120392)
 //
 // Exit Codes (Plan v4 Section 4.1):
 //   0: Success

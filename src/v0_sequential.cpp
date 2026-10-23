@@ -2,8 +2,9 @@
 // CSC14120 - Parallel Programming
 // Project: Panorama Image Stitching
 // Module: V0 Sequential Baseline Implementation (Plan v4)
-// Authors: GroupXX (Members A, B, C)
-// License: Apache-2.0 / BSD (ORB pattern adapted from Willow Garage / OpenCV)
+// Authors: Pham Minh Thong (23120364), Nguyen Le Tan Tien (23120369), Dao Quoc Tuan (23120392)
+// External sources: ORB bit_pattern_31_ adapted from OpenCV modules/features2d/src/orb.cpp
+//   (BSD 3-Clause License, Copyright 2000 Intel Corporation, Willow Garage Inc.)
 // ============================================================================
 
 #include "v0_sequential.h"
@@ -91,6 +92,8 @@ const int2 ORB_PATTERN_PAIRS[256][2] = {
 
 // ============================================================================
 // STAGE 1: PREPROCESSING (Grayscale + Gaussian Blur 5x5)
+// Kernel: 2D 5×5 Gaussian, σ≈1.04 (empirically fitted, NOT exact σ=1.0).
+// All V1+ versions must use this exact kernel for V0↔V1 correctness verification.
 // ============================================================================
 static const float GAUSS_KERNEL_5X5[5][5] = {
     { 0.003765f, 0.015019f, 0.023792f, 0.015019f, 0.003765f },

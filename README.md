@@ -42,7 +42,7 @@ Prj/
 │   ├── challenging/           # Challenging failure analysis scene (Small, Medium, Large)
 │   └── provided/              # Slot for instructor-provided dataset (external blocker)
 ├── notebooks/
-│   └── GroupXX_Midterm.ipynb  # Self-contained Jupyter Notebook for Midterm Submission (Week 7)
+│   └── Group19_Midterm.ipynb  # Self-contained Jupyter Notebook for Midterm Submission (Week 7)
 ├── output/                    # Destination directory for stitched panoramas and telemetry JSON files
 ├── Makefile                   # Automated build system: make cuda, make cpu, make test, make clean
 ├── requirements.txt           # Python dependency specifications
@@ -118,13 +118,13 @@ git push -u origin main
 ## 📦 Midterm Submission Guide (Phase B Quality Gate)
 
 - **Submission Timing:** Completed following **Phase B** (Stage B4: Midterm Submission Preparation).
-- **Archive Format (`GroupXX_Midterm.zip`):**
-  1. `GroupXX_Midterm.ipynb`: Notebook executed via "Runtime -> Run all" on Google Colab T4 with all outputs saved (GPU device info, per-stage Avg/Min timing tables, bottleneck plots, Amdahl analysis, and stitched panoramas with synthetic grid RMSE).
+- **Archive Format (`Group19_Midterm.zip`):**
+  1. `Group19_Midterm.ipynb`: Notebook executed via "Runtime -> Run all" on Google Colab T4 with all outputs saved (GPU device info, per-stage Avg/Min timing tables, bottleneck plots, Amdahl analysis, and stitched panoramas with synthetic grid RMSE).
   2. `src/`: Clean C++/CUDA source files (`common.h`, `cuda_utils.cuh`, `versions.h`, `main.cu`, `stb_impl.*`, `v0_sequential.*`).
   3. `Makefile` and `README.md`.
   4. Google Drive link containing original raw images and preprocessed 16:9 images (placed in the first cell of the notebook).
 
 To generate the submission archive automatically:
 ```bash
-python scripts/package_midterm.py --group GroupXX
+python scripts/package_midterm.py --group Group19
 ```

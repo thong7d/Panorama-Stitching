@@ -2,8 +2,7 @@
 // CSC14120 - Parallel Programming
 // Project: Panorama Image Stitching
 // Module: Common Types and Pipeline Contract (Plan v4)
-// Authors: GroupXX (Members A, B, C)
-// License: Apache-2.0 / BSD (ORB pattern from Willow Garage / OpenCV)
+// Authors: Pham Minh Thong (23120364), Nguyen Le Tan Tien (23120369), Dao Quoc Tuan (23120392)
 // ============================================================================
 
 #pragma once

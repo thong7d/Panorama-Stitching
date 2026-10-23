@@ -3,7 +3,7 @@
 ============================================================================
 CSC14120 - Parallel Programming
 Script: Generate Synthetic Image Pair with Ground-Truth Homography
-Authors: GroupXX (Members A, B, C)
+Authors: Pham Minh Thong (23120364), Nguyen Le Tan Tien (23120369), Dao Quoc Tuan (23120392)
 Description:
   - Generates a corner-rich synthetic scene at 3 resolutions (720p, 1080p, 4K)
   - Uses a rigorous projective transform (Homography H_A_to_B)
@@ -87,15 +87,18 @@ def create_rich_canvas(w: int, h: int) -> Image.Image:
 def get_ground_truth_homography(w: int, h: int):
     """
     Tạo ma trận Homography ground-truth chuẩn H_A_to_B:
-    Bao gồm tịnh tiến ngang ~35% chiều rộng (overlap ~45%),
-    xoay nhẹ ~1.2 độ, và biến dạng phối cảnh nhẹ (projective tilt).
+    Image B nằm bên PHẢI Image A. H_A_to_B maps điểm trong A sang B.
+    tx = -0.6*w: điểm (x_A, y_A) trong A ánh xạ sang (x_A - 0.6w, y_A) trong B.
+    Điều này có nghĩa B chứa nội dung canvas tại x ∈ [0.6w, 1.6w].
+    A chứa canvas [0, w]. Overlap thực tế: x ∈ [0.6w, w] ≈ 40% chiều rộng.
+    Xoay nhẹ ~1.2 độ và biến dạng phối cảnh nhẹ để tăng độ khó.
     """
     theta = math.radians(1.2)
     cos_t = math.cos(theta)
     sin_t = math.sin(theta)
 
-    # Tịnh tiến: t_x tương ứng ~35% w
-    tx = 0.35 * w
+    # tx = -0.6*w: B nằm bên phải A, overlap ~40%, không có vùng clamp artifact
+    tx = -0.6 * w
     ty = 0.015 * h
 
     # Thành phần phối cảnh (perspective / projective terms)
@@ -130,42 +133,46 @@ def generate_synthetic_pair_for_res(res_name: str, w: int, h: int, out_dir: str)
     # 3. Trích xuất Image A: vùng [0..w, 0..h] trên canvas
     img_A = canvas.crop((0, 0, w, h))
 
-    # 4. Trích xuất Image B: áp dụng phép chiếu ngược
-    # Đối với mỗi pixel (u, v) trong Image B, tìm tọa độ tương ứng (x, y) trên canvas:
+    # 4. Trích xuất Image B: áp dụng phép chiếu ngược theo từng strip để tránh OOM
     # Điểm trong B liên hệ với điểm trong A qua: [u, v, 1]^T ~ H_A_to_B * [x, y, 1]^T
     # Do đó [x, y, 1]^T ~ inv_H * [u, v, 1]^T
-    u_coords, v_coords = np.meshgrid(np.arange(w), np.arange(h))
-    ones = np.ones_like(u_coords)
+    # Process row-by-row to keep peak memory under ~10 MB per strip
+    STRIP = 64  # rows per strip
+    out_B = np.empty((h, w, 3), dtype=np.uint8)
+    u_row = np.arange(w, dtype=np.float64)
 
-    # Tọa độ trong B
-    pts_B = np.stack([u_coords, v_coords, ones], axis=-1).reshape(-1, 3).T # (3, w*h)
+    for y_start in range(0, h, STRIP):
+        y_end = min(y_start + STRIP, h)
+        strip_h = y_end - y_start
 
-    # Chiếu về canvas A
-    pts_A_proj = inv_H @ pts_B
-    x_canvas = pts_A_proj[0] / pts_A_proj[2]
-    y_canvas = pts_A_proj[1] / pts_A_proj[2]
+        # Build homogeneous coords for this strip: shape (3, strip_h*w)
+        uu = np.tile(u_row, strip_h)
+        vv = np.repeat(np.arange(y_start, y_end, dtype=np.float64), w)
+        ones_strip = np.ones(strip_h * w, dtype=np.float64)
+        pts_strip = np.stack([uu, vv, ones_strip])  # (3, strip_h*w)
 
-    x_canvas = x_canvas.reshape(h, w)
-    y_canvas = y_canvas.reshape(h, w)
+        proj = inv_H @ pts_strip
+        xc = (proj[0] / proj[2]).reshape(strip_h, w)
+        yc = (proj[1] / proj[2]).reshape(strip_h, w)
 
-    # Nội suy bilinear
-    x0 = np.clip(np.floor(x_canvas).astype(int), 0, canvas_w - 2)
-    y0 = np.clip(np.floor(y_canvas).astype(int), 0, canvas_h - 2)
-    x1 = x0 + 1
-    y1 = y0 + 1
+        x0 = np.clip(np.floor(xc).astype(np.int32), 0, canvas_w - 2)
+        y0 = np.clip(np.floor(yc).astype(np.int32), 0, canvas_h - 2)
+        x1 = x0 + 1
+        y1 = y0 + 1
 
-    wx = (x_canvas - x0)[..., None]
-    wy = (y_canvas - y0)[..., None]
+        wx = (xc - x0)[..., None].astype(np.float32)
+        wy = (yc - y0)[..., None].astype(np.float32)
 
-    ia = canvas_arr[y0, x0].astype(np.float32)
-    ib = canvas_arr[y0, x1].astype(np.float32)
-    ic = canvas_arr[y1, x0].astype(np.float32)
-    id_val = canvas_arr[y1, x1].astype(np.float32)
+        ia = canvas_arr[y0, x0].astype(np.float32)
+        ib = canvas_arr[y0, x1].astype(np.float32)
+        ic = canvas_arr[y1, x0].astype(np.float32)
+        id_v = canvas_arr[y1, x1].astype(np.float32)
 
-    top = ia * (1.0 - wx) + ib * wx
-    bottom = ic * (1.0 - wx) + id_val * wx
-    sampled_B = top * (1.0 - wy) + bottom * wy
-    img_B = Image.fromarray(np.clip(sampled_B, 0, 255).astype(np.uint8))
+        top    = ia * (1.0 - wx) + ib * wx
+        bottom = ic * (1.0 - wx) + id_v * wx
+        out_B[y_start:y_end] = np.clip(top * (1.0 - wy) + bottom * wy, 0, 255).astype(np.uint8)
+
+    img_B = Image.fromarray(out_B)
 
     # 5. Lưu ảnh Left (A) và Right (B)
     left_path = os.path.join(out_dir, f"left_{res_name}.jpg")
@@ -176,12 +183,13 @@ def generate_synthetic_pair_for_res(res_name: str, w: int, h: int, out_dir: str)
     print(f"     Left:  {left_path} ({w}x{h})")
     print(f"     Right: {right_path} ({w}x{h})")
 
-    # 6. Tạo validation grid points trên vùng overlap
-    # Vùng overlap x thuộc [0.2*w, 0.9*w], y thuộc [0.1*h, 0.9*h]
+    # 6. Tạo validation grid points trên vùng overlap thực tế
+    # Overlap: x_A ∈ [0.6w, w], mapped to x_B = x_A - 0.6w ∈ [0, 0.4w]
+    # Dùng [0.65w, 0.95w] để tránh biên và đảm bảo H_A_to_B map vào nội thất B
     grid_pts_A = []
     grid_pts_B = []
     for gy in np.linspace(0.15 * h, 0.85 * h, 10):
-        for gx in np.linspace(0.25 * w, 0.85 * w, 10):
+        for gx in np.linspace(0.65 * w, 0.95 * w, 10):
             pA = np.array([gx, gy, 1.0])
             pB = H_A_to_B @ pA
             bx = pB[0] / pB[2]
