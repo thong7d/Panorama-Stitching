@@ -157,7 +157,7 @@ if not os.path.exists("src/common.h"):
             # Fallback: clone repository at the pinned commit used for submission
             REPO_URL = "https://github.com/thong7d/Panorama-Stitching.git"
             REPO_DIR = "Panorama-Stitching"
-            PINNED_COMMIT = "HEAD"  # Replace with actual commit hash after final submission
+            PINNED_COMMIT = "24edd79"  # Submission commit — Week 7 Midterm
             if not os.path.exists(REPO_DIR):
                 print(f"[INFO] Cloning repository from {REPO_URL}...")
                 os.system(f"git clone {REPO_URL}")
