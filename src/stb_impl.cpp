@@ -1,3 +1,11 @@
+// ============================================================================
+// CSC14120 - Lập trình song song | Ghép ảnh Panorama
+// Tác giả: Pham Minh Thong (23120364), Nguyen Le Tan Tien (23120369),
+//          Dao Quoc Tuan (23120392)
+// External source: stb_image/stb_image_write bởi Sean Barrett và cộng sự,
+// public domain hoặc MIT; xem THIRD_PARTY_NOTICES.md.
+// ============================================================================
+
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
@@ -21,16 +29,16 @@
 
 bool load_image(const std::string& path, Image& img) {
     int w, h, channels;
-    // Force 4 channels (RGBA)
+    // Bắt buộc 4 kênh màu (RGBA)
     unsigned char* raw = stbi_load(path.c_str(), &w, &h, &channels, 4);
     if (!raw) {
-        std::cerr << "[Error] Failed to load image: " << path 
-                  << " (reason: " << stbi_failure_reason() << ")\n";
+        std::cerr << "[Lỗi] Không thể tải ảnh: " << path 
+                  << " (nguyên nhân: " << stbi_failure_reason() << ")\n";
         return false;
     }
 
     img.allocate(w, h);
-    // Copy into uchar4 data
+    // Sao chép sang bộ nhớ uchar4
     std::memcpy(img.data, raw, (size_t)w * h * sizeof(uchar4));
     stbi_image_free(raw);
     return true;
@@ -38,12 +46,12 @@ bool load_image(const std::string& path, Image& img) {
 
 bool save_image(const std::string& path, const Image& img, int quality) {
     if (!img.data || img.w <= 0 || img.h <= 0) {
-        std::cerr << "[Error] Cannot save empty image to " << path << "\n";
+        std::cerr << "[Lỗi] Không thể lưu ảnh rỗng vào " << path << "\n";
         return false;
     }
 
     int success = 0;
-    // Check extension
+    // Kiểm tra định dạng phần mở rộng
     if (path.size() >= 4 && path.substr(path.size() - 4) == ".png") {
         success = stbi_write_png(path.c_str(), img.w, img.h, 4, img.data, img.w * 4);
     } else {
@@ -51,7 +59,7 @@ bool save_image(const std::string& path, const Image& img, int quality) {
     }
 
     if (!success) {
-        std::cerr << "[Error] Failed to save image: " << path << "\n";
+        std::cerr << "[Lỗi] Lưu ảnh thất bại: " << path << "\n";
         return false;
     }
     return true;
@@ -60,7 +68,7 @@ bool save_image(const std::string& path, const Image& img, int quality) {
 bool save_gray_image(const std::string& path, const GrayImage& gray_img) {
     if (!gray_img.data || gray_img.w <= 0 || gray_img.h <= 0) return false;
 
-    // Convert float [0..255] to uint8_t
+    // Chuyển đổi float [0..255] sang uint8_t
     int total_pixels = gray_img.w * gray_img.h;
     std::vector<uint8_t> buf(total_pixels);
     for (int i = 0; i < total_pixels; i++) {
@@ -76,3 +84,4 @@ bool save_gray_image(const std::string& path, const GrayImage& gray_img) {
     }
     return success != 0;
 }
+

@@ -1,3 +1,10 @@
+// ============================================================================
+// CSC14120 - Lập trình song song | Ghép ảnh Panorama
+// Tác giả: Pham Minh Thong (23120364), Nguyen Le Tan Tien (23120369),
+//          Dao Quoc Tuan (23120392)
+// External sources: Tài liệu CUDA Runtime API. Không sao chép mã nguồn bên ngoài.
+// ============================================================================
+
 #pragma once
 
 #include <iostream>
@@ -10,8 +17,8 @@
     do {                                                                       \
         cudaError_t err = call;                                                \
         if (err != cudaSuccess) {                                              \
-            std::cerr << "CUDA Error at " << __FILE__ << ":" << __LINE__       \
-                      << " code=" << err << " \"" << cudaGetErrorString(err)   \
+            std::cerr << "Lỗi CUDA tại " << __FILE__ << ":" << __LINE__        \
+                      << " mã=" << err << " \"" << cudaGetErrorString(err)     \
                       << "\"" << std::endl;                                    \
             exit(5);                                                           \
         }                                                                      \
@@ -41,14 +48,14 @@ struct GpuTimer {
 
 #else
 
-// Fallback GpuTimer wrapper for host-only compilation (CPU)
+// Lớp bọc GpuTimer dự phòng khi biên dịch chỉ trên CPU
 struct GpuTimer {
-    std::chrono::high_resolution_clock::time_point t_start;
+    std::chrono::steady_clock::time_point t_start;
     void Start() {
-        t_start = std::chrono::high_resolution_clock::now();
+        t_start = std::chrono::steady_clock::now();
     }
     float Stop() {
-        auto t_end = std::chrono::high_resolution_clock::now();
+        auto t_end = std::chrono::steady_clock::now();
         std::chrono::duration<float, std::milli> dur = t_end - t_start;
         return dur.count();
     }
@@ -58,15 +65,16 @@ struct GpuTimer {
 
 #endif
 
-// CPU Timer for high-accuracy host measurement
+// Bộ bấm giờ CPU độ chính xác cao cho các đo đạc trên host
 struct CpuTimer {
-    std::chrono::high_resolution_clock::time_point t_start;
+    std::chrono::steady_clock::time_point t_start;
     void Start() {
-        t_start = std::chrono::high_resolution_clock::now();
+        t_start = std::chrono::steady_clock::now();
     }
     float Stop() {
-        auto t_end = std::chrono::high_resolution_clock::now();
+        auto t_end = std::chrono::steady_clock::now();
         std::chrono::duration<float, std::milli> dur = t_end - t_start;
         return dur.count();
     }
 };
+

@@ -2,8 +2,10 @@
 // CSC14120 - Parallel Programming
 // Project: Panorama Image Stitching
 // Module: Common Types and Pipeline Contract (Plan v4)
-// Authors: GroupXX (Members A, B, C)
-// License: Apache-2.0 / BSD (ORB pattern from Willow Garage / OpenCV)
+// Authors: Pham Minh Thong (23120364), Nguyen Le Tan Tien (23120369),
+//          Dao Quoc Tuan (23120392)
+// External sources: OpenCV ORB pattern (BSD-3-Clause) and stb image I/O
+// (public domain/MIT); see THIRD_PARTY_NOTICES.md. All other code is original.
 // ============================================================================
 
 #pragma once
@@ -267,6 +269,7 @@ struct PipelineDiagnostics {
 // Stage execution metrics (Avg + Min) per Plan v4 Section 4.3
 struct StageMetric {
     float avg = 0.0f;
+    float median = 0.0f;
     float min = 0.0f;
 };
 
@@ -297,6 +300,8 @@ struct PipelineResult {
     std::string optimization_str;
     int image_width = 0;
     int image_height = 0;
+    float amdahl_parallel_fraction = 0.0f;
+    float amdahl_max_speedup = 1.0f;
 
     bool export_metrics_json(const std::string& json_path) const;
 };

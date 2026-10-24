@@ -7,6 +7,7 @@
     "large": [3840, 2160]
   },
   "drive_url": "https://drive.google.com/drive/folders/1vnD51fqHjY-HGqp365dTa1SX_0femIwG?usp=drive_link",
+  "capture_location_note": "Exact GPS coordinates were not recorded; locations are documented by the visible scene context in the original captures.",
   "pairs": [
     {
       "id": "site1_indoor",
@@ -14,7 +15,10 @@
       "directory": "dataset/site1_indoor",
       "left_raw": "In1.png",
       "right_raw": "In2.png",
-      "description": "Indoor classroom and hallway scene with distinct geometric lines and controlled lighting"
+      "description": "Group-captured indoor kitchen/utility-room panorama with cupboards, appliances, tiled walls and strong straight edges",
+      "capture_location": "Indoor residential kitchen/utility room (exact GPS not recorded)",
+      "estimated_overlap_percent": 56,
+      "visual_challenges": ["near-field parallax", "depth discontinuities", "indoor exposure variation"]
     },
     {
       "id": "site2_outdoor",
@@ -22,7 +26,10 @@
       "directory": "dataset/site2_outdoor",
       "left_raw": "out1.png",
       "right_raw": "out2.png",
-      "description": "Outdoor campus plaza scene with natural sunlight, distant buildings, and pavement textures"
+      "description": "Group-captured open-field panorama dominated by grassland, sky and a sparse tree line",
+      "capture_location": "Outdoor open field (exact GPS not recorded)",
+      "estimated_overlap_percent": 66,
+      "visual_challenges": ["large low-texture sky", "repetitive grass texture", "few distinctive landmarks"]
     },
     {
       "id": "site3_custom",
@@ -30,7 +37,10 @@
       "directory": "dataset/site3_custom",
       "left_raw": "cus1.png",
       "right_raw": "cus2.png",
-      "description": "Custom site scene featuring architectural elements and high-frequency corner details"
+      "description": "Group-captured outdoor courtyard/residential scene with a white facade, trees and neighboring buildings",
+      "capture_location": "Outdoor building courtyard/residential area (exact GPS not recorded)",
+      "estimated_overlap_percent": 51,
+      "visual_challenges": ["strong perspective", "depth variation", "foliage motion", "bright sky"]
     },
     {
       "id": "challenging",
@@ -38,7 +48,10 @@
       "directory": "dataset/challenging",
       "left_raw": "Cha1.png",
       "right_raw": "Cha2.png",
-      "description": "Challenging scene with dynamic lighting, reflections, and perspective deformation for failure analysis"
+      "description": "Group-captured urban rooftop panorama at night with buildings, point lights and dark foreground roofs",
+      "capture_location": "Urban rooftop at night (exact GPS not recorded)",
+      "estimated_overlap_percent": 63,
+      "visual_challenges": ["low light", "sensor noise", "lamp glare", "repetitive building geometry", "exposure imbalance"]
     },
     {
       "id": "provided",

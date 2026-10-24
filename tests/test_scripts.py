@@ -4,16 +4,21 @@
 CSC14120 - Parallel Programming
 Project: Panorama Image Stitching
 Module: Phase A Python Integration Tests (Plan v4 Section 6)
-Authors: GroupXX (Members A, B, C)
+Authors: Pham Minh Thong (23120364), Nguyen Le Tan Tien (23120369),
+         Dao Quoc Tuan (23120392)
+External sources: Python unittest patterns only; test logic is original.
 ============================================================================
 """
 
 import os
 import sys
+import io
 import json
 import tempfile
 import subprocess
+from contextlib import redirect_stdout
 from pathlib import Path
+from PIL import Image
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(WORKSPACE_ROOT))
@@ -33,6 +38,14 @@ def test_manifest_structure():
     required_ids = ["site1_indoor", "site2_outdoor", "site3_custom", "challenging"]
     for rid in required_ids:
         assert rid in pair_ids, f"Required pair ID '{rid}' missing from manifest"
+
+    for pair in data["pairs"]:
+        if pair.get("kind") not in {"standard", "challenging"}:
+            continue
+        assert pair.get("capture_location"), f"{pair['id']} missing capture_location"
+        assert pair.get("visual_challenges"), f"{pair['id']} missing visual_challenges"
+        overlap = pair.get("estimated_overlap_percent")
+        assert isinstance(overlap, (int, float)) and 0 < overlap < 100
     
     print(f"  -> Found {len(data['pairs'])} pairs in manifest: {pair_ids} (PASS)")
 
@@ -75,26 +88,30 @@ def test_validate_metrics_script():
         "image_height": 720,
         "runs": 5,
         "warmups": 1,
+        "amdahl_model": "Selected hot stages S1+S2+S6 over median end-to-end",
+        "amdahl_parallel_fraction": 0.75,
+        "amdahl_smax": 4.0,
         "status": "SUCCESS",
         "warning": "None",
         "keypoints_a": 850,
         "keypoints_b": 870,
         "matches": 420,
         "inliers": 290,
+        "inlier_ratio": 290 / 420,
         "homography_a_to_b": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
         "timing_ms": {
-            "stage1_preprocess": {"avg": 5.0, "min": 4.8},
-            "stage2_fast_nms_topk": {"avg": 12.0, "min": 11.5},
-            "stage3_orb_descriptor": {"avg": 8.0, "min": 7.8},
-            "stage4_matching": {"avg": 15.0, "min": 14.7},
-            "stage5_ransac": {"avg": 25.0, "min": 24.1},
-            "stage6_warping_blending": {"avg": 30.0, "min": 29.5},
-            "kernel_total": {"avg": 95.0, "min": 92.4},
-            "h2d": {"avg": 0.0, "min": 0.0},
-            "control": {"avg": 0.0, "min": 0.0},
-            "d2h": {"avg": 0.0, "min": 0.0},
-            "end_to_end": {"avg": 98.0, "min": 95.2},
-            "setup": {"avg": 0.0, "min": 0.0}
+            "stage1_preprocess": {"avg": 5.0, "median": 4.9, "min": 4.8},
+            "stage2_fast_nms_topk": {"avg": 12.0, "median": 11.8, "min": 11.5},
+            "stage3_orb_descriptor": {"avg": 8.0, "median": 7.9, "min": 7.8},
+            "stage4_matching": {"avg": 15.0, "median": 14.9, "min": 14.7},
+            "stage5_ransac": {"avg": 25.0, "median": 24.5, "min": 24.1},
+            "stage6_warping_blending": {"avg": 30.0, "median": 29.8, "min": 29.5},
+            "kernel_total": {"avg": 95.0, "median": 93.0, "min": 92.4},
+            "h2d": {"avg": 0.0, "median": 0.0, "min": 0.0},
+            "control": {"avg": 0.0, "median": 0.0, "min": 0.0},
+            "d2h": {"avg": 0.0, "median": 0.0, "min": 0.0},
+            "end_to_end": {"avg": 98.0, "median": 96.0, "min": 95.2},
+            "setup": {"avg": 0.0, "median": 0.0, "min": 0.0}
         }
     }
     
@@ -114,11 +131,14 @@ def test_validate_metrics_script():
         temp_bad_path = f.name
         
     try:
-        assert validate_metrics_json(temp_bad_path) == False, "Validator accepted invalid JSON"
+        expected_diagnostic = io.StringIO()
+        with redirect_stdout(expected_diagnostic):
+            assert validate_metrics_json(temp_bad_path) == False, "Validator accepted invalid JSON"
+        assert "[Lỗi]" in expected_diagnostic.getvalue() or "[Error]" in expected_diagnostic.getvalue()
     finally:
         os.remove(temp_bad_path)
         
-    print("  -> Schema validator logic tested (PASS)")
+    print("  -> Đã kiểm thử logic xác thực schema (ĐẠT)")
 
 def test_preprocessed_images_exist():
     print("[Python Test 4] Checking preprocessed image files...")
@@ -131,15 +151,83 @@ def test_preprocessed_images_exist():
             right_img = WORKSPACE_ROOT / "dataset" / s / f"right_{r}.jpg"
             assert left_img.is_file(), f"Missing {left_img}"
             assert right_img.is_file(), f"Missing {right_img}"
+            expected = {
+                "small": (1280, 720),
+                "medium": (1920, 1080),
+                "large": (3840, 2160),
+            }[r]
+            with Image.open(left_img) as image:
+                assert image.size == expected, f"{left_img} has size {image.size}, expected {expected}"
+            with Image.open(right_img) as image:
+                assert image.size == expected, f"{right_img} has size {image.size}, expected {expected}"
+
+    print("  -> All real pairs exist at the three required 16:9 resolutions (PASS)")
+
+
+def test_homography_validation_math():
+    print("[Python Test 5] Checking homography normalization across resolutions...")
+    import numpy as np
+    from scripts.validate_homography import _normalized_homography
+
+    H_normalized = np.array([
+        [1.05, -0.02, -0.35],
+        [0.01, 0.98, -0.08],
+        [0.002, -0.001, 1.0],
+    ])
+    normalized_results = []
+    for width, height in [(1280, 720), (1920, 1080), (3840, 2160)]:
+        scale = np.diag([width, height, 1.0])
+        H_pixels = scale @ H_normalized @ np.linalg.inv(scale)
+        normalized_results.append(_normalized_homography(H_pixels, width, height))
+    for result in normalized_results:
+        assert np.allclose(result, H_normalized, atol=1e-10)
+    print("  -> Pixel-space homographies normalize to one resolution-invariant model (PASS)")
+
+
+def test_source_provenance_and_v0_single_thread():
+    print("[Python Test 6] Checking source provenance and single-thread V0 contract...")
+    authored_files = [
+        WORKSPACE_ROOT / "Makefile",
+        *sorted((WORKSPACE_ROOT / "src").glob("*.cpp")),
+        *sorted((WORKSPACE_ROOT / "src").glob("*.cu")),
+        *sorted((WORKSPACE_ROOT / "src").glob("*.h")),
+        *sorted((WORKSPACE_ROOT / "src").glob("*.cuh")),
+        *sorted((WORKSPACE_ROOT / "scripts").glob("*.py")),
+        *sorted((WORKSPACE_ROOT / "tests").glob("*.*")),
+    ]
+    authored_files = [
+        path for path in authored_files
+        if path.name not in {"stb_image.h", "stb_image_write.h"}
+    ]
+    for path in authored_files:
+        text = path.read_text(encoding="utf-8")
+        assert "Pham Minh Thong" in text, f"{path} missing author header"
+        assert "External source" in text, f"{path} missing external-source declaration"
+
+    v0_text = (WORKSPACE_ROOT / "src" / "v0_sequential.cpp").read_text(encoding="utf-8")
+    banned = ["#include <thread>", "std::thread", "#pragma omp", "_mm_", "__m128", "__m256"]
+    for token in banned:
+        assert token not in v0_text, f"V0 violates single-thread/no-manual-SIMD contract: {token}"
+    print("  -> Authorship/source headers present; V0 has no thread/OpenMP/manual-SIMD API (PASS)")
             
 def test_midterm_notebook_validity():
-    print("[Python Test 5] Checking Group19_Midterm.ipynb validity with nbformat...")
+    print("[Python Test 7] Checking Group19_Midterm.ipynb validity with nbformat...")
     import nbformat
     nb_path = WORKSPACE_ROOT / "notebooks" / "Group19_Midterm.ipynb"
     assert nb_path.is_file(), f"Notebook file not found at: {nb_path}"
     with open(nb_path, "r", encoding="utf-8") as f:
         nb = nbformat.read(f, as_version=4)
     assert len(nb.cells) >= 20, f"Expected at least 20 cells in Group19_Midterm.ipynb, got {len(nb.cells)}"
+    source = "\n".join(cell.source for cell in nb.cells)
+    assert "git clone" not in source and "git pull" not in source, (
+        "Notebook must use the packaged src/ tree, not mutable Git state"
+    )
+    assert "THIRD-PARTY SOURCES" in source
+    errors = [
+        output for cell in nb.cells if cell.cell_type == "code"
+        for output in cell.get("outputs", []) if output.output_type == "error"
+    ]
+    assert not errors, f"Notebook contains saved error outputs: {errors}"
     print(f"  -> Group19_Midterm.ipynb parsed successfully with {len(nb.cells)} cells (PASS)")
 
 if __name__ == "__main__":
@@ -150,6 +238,8 @@ if __name__ == "__main__":
     test_synthetic_ground_truth()
     test_validate_metrics_script()
     test_preprocessed_images_exist()
+    test_homography_validation_math()
+    test_source_provenance_and_v0_single_thread()
     test_midterm_notebook_validity()
     print("=========================================================")
     print("[ALL PYTHON INTEGRATION TESTS PASSED]")

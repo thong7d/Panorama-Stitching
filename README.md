@@ -1,6 +1,9 @@
 # CSC14120 — CUDA-Accelerated Panorama Image Stitching
 ## Course Project: Parallel Programming
 
+**Group 19:** Pham Minh Thong (23120364), Nguyen Le Tan Tien (23120369),
+Dao Quoc Tuan (23120392).
+
 This repository implements and parallelizes an end-to-end **Panorama Image Stitching** pipeline using CUDA and modern C++17, comprising:
 1. **Stage 1 (Preprocessing):** Luminance grayscale conversion ($Y = 0.299R + 0.587G + 0.114B$) and 5×5 Gaussian convolution ($\sigma = 1.0$).
 2. **Stage 2 (Detection):** FAST-9 Corner Detector ($T=20$), 3×3 Non-Maximum Suppression (NMS), and deterministic Top-$K$ selection ($K=1000$) ordered by `(response DESC, linear_index ASC)`.
@@ -28,7 +31,9 @@ Prj/
 │   ├── preprocess_dataset.py  # PNG/JPEG/HEIC loader, EXIF orientation, 16:9 center crop, multi-resolution export
 │   ├── generate_synthetic_test.py # Synthetic scene generator with exact projective homography and grid points
 │   ├── validate_metrics.py    # JSON metrics schema validator (Plan v4 Section 4.3)
+│   ├── validate_homography.py # OpenCV reference + cross-resolution H checks
 │   ├── build_midterm_notebook.py # Automated notebook generator using nbformat
+│   ├── execute_notebook.py    # Pure-Python Run-All/output persistence fallback
 │   └── package_midterm.py     # Midterm zip packaging script (Plan v4 Section B3)
 ├── tests/
 │   ├── test_cpu.cpp           # C++ unit tests: ORB pattern, RAII contracts, Hamming popcount, Homography
@@ -36,16 +41,17 @@ Prj/
 ├── dataset/
 │   ├── manifest.json          # Dataset manifest catalog (indoor, outdoor, custom, challenging, provided)
 │   ├── synthetic/             # Synthetic images with ground_truth.json across 3 resolutions
-│   ├── site1_indoor/          # Indoor classroom/hallway scene (Small, Medium, Large)
-│   ├── site2_outdoor/         # Outdoor campus plaza scene (Small, Medium, Large)
-│   ├── site3_custom/          # Custom architectural scene (Small, Medium, Large)
-│   ├── challenging/           # Challenging failure analysis scene (Small, Medium, Large)
+│   ├── site1_indoor/          # Indoor kitchen/utility-room scene
+│   ├── site2_outdoor/         # Low-texture open-field scene
+│   ├── site3_custom/          # Building courtyard/residential scene
+│   ├── challenging/           # Low-light urban rooftop scene
 │   └── provided/              # Slot for instructor-provided dataset (external blocker)
 ├── notebooks/
-│   └── GroupXX_Midterm.ipynb  # Self-contained Jupyter Notebook for Midterm Submission (Week 7)
+│   └── Group19_Midterm.ipynb  # Executed Midterm notebook with saved outputs
 ├── output/                    # Destination directory for stitched panoramas and telemetry JSON files
 ├── Makefile                   # Automated build system: make cuda, make cpu, make test, make clean
 ├── requirements.txt           # Python dependency specifications
+├── THIRD_PARTY_NOTICES.md     # Code/data attribution and algorithm references
 └── project_plan_v4.md         # Single authoritative project execution plan
 ```
 
@@ -65,7 +71,7 @@ make cuda
 make test
 python tests/test_scripts.py
 
-# 4. Run V0 sequential baseline (5 repeated runs) and export JSON metrics
+# 4. Run V0 sequential baseline (1 warm-up + 5 timed runs) and export JSON metrics
 ./stitch dataset/synthetic/left_small.jpg \
          dataset/synthetic/right_small.jpg \
          output/synthetic_pano_small.jpg \
@@ -100,15 +106,15 @@ The complete raw image dataset (including raw camera PNG files and high-resoluti
 
 To clone this repository and run locally:
 ```bash
-git clone https://github.com/<username>/<repo-name>.git
-cd <repo-name>
+git clone https://github.com/thong7d/Panorama-Stitching.git
+cd Panorama-Stitching
 pip install -r requirements.txt
 make test
 ```
 
 To push local code to a newly created GitHub remote:
 ```bash
-git remote add origin https://github.com/<username>/<repo-name>.git
+git remote add origin https://github.com/thong7d/Panorama-Stitching.git
 git branch -M main
 git push -u origin main
 ```
@@ -118,13 +124,19 @@ git push -u origin main
 ## 📦 Midterm Submission Guide (Phase B Quality Gate)
 
 - **Submission Timing:** Completed following **Phase B** (Stage B4: Midterm Submission Preparation).
-- **Archive Format (`GroupXX_Midterm.zip`):**
-  1. `GroupXX_Midterm.ipynb`: Notebook executed via "Runtime -> Run all" on Google Colab T4 with all outputs saved (GPU device info, per-stage Avg/Min timing tables, bottleneck plots, Amdahl analysis, and stitched panoramas with synthetic grid RMSE).
+- **Archive Format (`Group19_Midterm.zip`):**
+  1. `Group19_Midterm.ipynb`: notebook with saved outputs from every code
+     cell, per-stage Avg/Median/Min at all resolutions, finite Amdahl analysis,
+     OpenCV homography cross-checks, and panorama gallery.
   2. `src/`: Clean C++/CUDA source files (`common.h`, `cuda_utils.cuh`, `versions.h`, `main.cu`, `stb_impl.*`, `v0_sequential.*`).
   3. `Makefile` and `README.md`.
   4. Google Drive link containing original raw images and preprocessed 16:9 images (placed in the first cell of the notebook).
 
 To generate the submission archive automatically:
 ```bash
-python scripts/package_midterm.py --group GroupXX
+python scripts/package_midterm.py --group Group19
 ```
+
+The notebook uses the exact `src/` tree from the submitted archive and never
+updates source from a remote repository during execution. See
+`THIRD_PARTY_NOTICES.md` for OpenCV/stb attribution and paper references.

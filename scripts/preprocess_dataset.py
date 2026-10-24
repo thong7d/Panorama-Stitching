@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
 ============================================================================
-CSC14120 - Parallel Programming
-Script: Preprocess Dataset (PNG/JPEG/HEIC -> Standardized 16:9 Multi-resolution)
-Authors: GroupXX (Members A, B, C)
-Description:
-  - Reads dataset/manifest.json
-  - Registers pillow_heif opener if available
-  - Corrects EXIF orientation
-  - Center-crops images to 16:9 aspect ratio
-  - Generates 3 resolutions: Small (1280x720), Medium (1920x1080), Large (3840x2160)
-  - Validates output dimensions and returns 0 on success, non-zero on failure.
+CSC14120 - Lập trình song song
+Kịch bản: Tiền xử lý tập dữ liệu (PNG/JPEG/HEIC -> Chuẩn hóa 16:9 Đa độ phân giải)
+Tác giả: Pham Minh Thong (23120364), Nguyen Le Tan Tien (23120369),
+         Dao Quoc Tuan (23120392)
+External sources: Tài liệu API Pillow và pillow-heif; không sao chép mã nguồn bên ngoài.
+Mô tả:
+  - Đọc dataset/manifest.json
+  - Đăng ký bộ đọc HEIF nếu có sẵn thư viện
+  - Hiệu chỉnh hướng xoay EXIF
+  - Cắt trọng tâm theo tỷ lệ chuẩn 16:9
+  - Xuất 3 độ phân giải: Small (1280x720), Medium (1920x1080), Large (3840x2160)
+  - Xác thực kích thước ảnh đầu ra và trả về 0 nếu thành công.
 ============================================================================
 """
 
@@ -19,7 +21,7 @@ import sys
 import json
 from PIL import Image, ImageOps
 
-# Register HEIF opener if pillow_heif is available
+# Đăng ký bộ mở file HEIF nếu thư viện pillow_heif khả dụng
 try:
     import pillow_heif
     pillow_heif.register_heif_opener()
@@ -33,56 +35,56 @@ RESOLUTIONS = {
 }
 
 def crop_center_16_9(img: Image.Image) -> Image.Image:
-    """Center crop image to exact 16:9 aspect ratio."""
+    """Cắt giữa ảnh theo tỷ lệ khung hình 16:9 chuẩn xác."""
     w, h = img.size
     target_ratio = 16.0 / 9.0
     current_ratio = w / h
 
     if current_ratio > target_ratio:
-        # Image is wider than 16:9 -> crop left and right margins
+        # Ảnh rộng hơn 16:9 -> Cắt bớt lề trái và phải
         new_w = int(round(h * target_ratio))
         offset = (w - new_w) // 2
         return img.crop((offset, 0, offset + new_w, h))
     else:
-        # Image is taller than 16:9 -> crop top and bottom margins
+        # Ảnh cao hơn 16:9 -> Cắt bớt lề trên và dưới
         new_h = int(round(w / target_ratio))
         offset = (h - new_h) // 2
         return img.crop((0, offset, w, offset + new_h))
 
 def process_file(raw_path: str, out_dir: str, prefix: str) -> bool:
-    """Process a raw image: EXIF orientation, 16:9 center crop, and 3 resolutions export."""
+    """Xử lý ảnh gốc: xoay EXIF, cắt tâm 16:9, và xuất 3 độ phân giải chuẩn."""
     if not os.path.isfile(raw_path):
-        print(f"[Error] Raw file not found: {raw_path}")
+        print(f"[Lỗi] Không tìm thấy file gốc: {raw_path}")
         return False
 
     try:
         with Image.open(raw_path) as img:
-            # 1. Correct EXIF orientation
+            # 1. Hiệu chỉnh góc xoay theo EXIF
             img = ImageOps.exif_transpose(img)
-            # 2. Ensure RGB mode (strip Alpha channel if present)
+            # 2. Đảm bảo hệ màu RGB (bỏ kênh Alpha nếu có)
             if img.mode != 'RGB':
                 img = img.convert('RGB')
 
-            # 3. Center crop to 16:9
+            # 3. Cắt trọng tâm 16:9
             cropped = crop_center_16_9(img)
 
-            # 4. Export 3 standard resolutions
+            # 4. Xuất 3 độ phân giải chuẩn
             for res_name, (tw, th) in RESOLUTIONS.items():
                 resized = cropped.resize((tw, th), Image.Resampling.LANCZOS)
                 out_path = os.path.join(out_dir, f"{prefix}_{res_name}.jpg")
                 resized.save(out_path, format='JPEG', quality=95)
 
-                # Validate saved dimension
+                # Xác thực lại kích thước đã lưu
                 with Image.open(out_path) as check_img:
                     if check_img.size != (tw, th):
-                        print(f"[Error] Dimension mismatch for {out_path}: expected {(tw, th)}, got {check_img.size}")
+                        print(f"[Lỗi] Sai lệch kích thước tại {out_path}: kỳ vọng {(tw, th)}, thực tế {check_img.size}")
                         return False
 
-                print(f"  [OK] Saved: {out_path} ({tw}x{th})")
+                print(f"  [OK] Đã lưu: {out_path} ({tw}x{th})")
 
         return True
     except Exception as e:
-        print(f"[Error] Failed to process {raw_path}: {e}")
+        print(f"[Lỗi] Không thể xử lý file {raw_path}: {e}")
         return False
 
 def main():
@@ -90,7 +92,7 @@ def main():
     manifest_path = os.path.join(repo_root, "dataset", "manifest.json")
 
     if not os.path.isfile(manifest_path):
-        print(f"[Error] Manifest file not found at {manifest_path}")
+        print(f"[Lỗi] Không tìm thấy tệp manifest tại {manifest_path}")
         sys.exit(1)
 
     with open(manifest_path, 'r', encoding='utf-8') as f:
@@ -99,7 +101,7 @@ def main():
     all_success = True
     processed_count = 0
 
-    print("=== STARTING DATASET PREPROCESSING (16:9 Multi-Resolution) ===")
+    print("=== BẮT ĐẦU TIỀN XỬ LÝ DATASET (Chuẩn hóa 16:9 Đa độ phân giải) ===")
     for pair in manifest.get("pairs", []):
         pair_id = pair.get("id")
         kind = pair.get("kind")
@@ -107,15 +109,15 @@ def main():
         pair_dir = os.path.join(repo_root, rel_dir)
 
         if kind == "provided" or pair.get("status") == "external_blocker":
-            print(f"\n[Pair: {pair_id}] Skipping provided dataset (External blocker - to be downloaded when released).")
+            print(f"\n[Cặp: {pair_id}] Bỏ qua dataset giảng viên (External blocker - sẽ tải về khi được cung cấp).")
             continue
 
-        print(f"\n[Pair: {pair_id}] Processing directory: {pair_dir}")
+        print(f"\n[Cặp: {pair_id}] Đang xử lý thư mục: {pair_dir}")
         left_raw_name = pair.get("left_raw")
         right_raw_name = pair.get("right_raw")
 
         if not left_raw_name or not right_raw_name:
-            print(f"[Error] Missing left_raw or right_raw in manifest for pair {pair_id}")
+            print(f"[Lỗi] Thiếu left_raw hoặc right_raw trong manifest cho cặp {pair_id}")
             all_success = False
             continue
 
@@ -130,12 +132,13 @@ def main():
         else:
             all_success = False
 
-    print(f"\n=== PREPROCESSING COMPLETED: {processed_count} pairs processed successfully. ===")
+    print(f"\n=== HOÀN TẤT TIỀN XỬ LÝ: {processed_count} cặp ảnh đã xử lý thành công. ===")
     if not all_success:
-        print("[Error] Some files failed to process!")
+        print("[Lỗi] Một số tệp gặp sự cố khi xử lý!")
         sys.exit(1)
     else:
-        print("[Success] All standard and challenging pairs preprocessed and validated.")
+        print("[Thành công] Tất cả các cặp ảnh chuẩn và ảnh thử thách đã được tiền xử lý và xác thực.")
 
 if __name__ == "__main__":
     main()
+

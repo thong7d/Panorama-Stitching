@@ -34,6 +34,10 @@ Nhận hai ảnh RGB có vùng chồng lấn, ước lượng homography và t�
 7. **Tái lập:** seed, tie-break, dataset manifest, lệnh build và benchmark đều cố định.
 8. **Học thuật:** mọi file sửa/viết có header tác giả và nguồn; notebook có references và AI usage declaration.
 9. **Không gộp tối ưu:** CUDA streams và kernel fusion, nếu làm, phải nằm ở hai version khác nhau.
+10. **Quy tắc ngôn ngữ:**
+    - Tiếng Việt có dấu: giao tiếp trong hội thoại, plan chi tiết, comment trong code, những phần in ra màn hình, các cell giải thích notebook.
+    - Tiếng Anh: code (tên biến, tên hàm, tên struct/class, hằng số, từ khóa lập trình...), git commit.
+    - Tuyệt đối không thay đổi mã code hay các mạch logic thuật toán khi dịch chuyển ngôn ngữ.
 
 ### 1.3 Workflow bắt buộc
 
@@ -57,30 +61,34 @@ Phase E  Full benchmark + Final report + video + oral defense
 
 ### 2.1 Thành phần hiện có
 
-- `src/`: V0 sequential, CLI, common types, CUDA timer wrapper và stb image I/O.
-- `scripts/`: preprocess ảnh và tạo synthetic pair.
-- `notebooks/GroupXX_Midterm.ipynb`: notebook khung nhưng chưa chạy.
-- `dataset/`: ba cặp HEIC tại ba site; `challenging/` và `provided/` trống.
-- `output/`: trống.
-- Chưa có V1/V2/V3 CUDA implementation và chưa có test suite.
-- Workspace hiện không phải Git repository và máy local không có C++/CUDA compiler; benchmark chính thức phải chạy trên Colab T4.
+- `src/`: V0 C++ single-thread hoàn chỉnh, CLI, metrics Avg/Median/Min,
+  Amdahl hữu hạn, RANSAC consensus refit, stb image I/O và provenance headers.
+- `scripts/`: preprocess, synthetic GT, metrics validation, OpenCV homography
+  cross-check, notebook build/execute và package quality gate.
+- `tests/`: C++ unit/regression tests và Python integration/reproducibility tests.
+- `notebooks/Group19_Midterm.ipynb`: 28 cells, toàn bộ code cells đã execute,
+  không có error output; dùng đúng source trong archive thay vì cập nhật từ Git.
+- `dataset/`: synthetic + ba standard pairs + challenging pair, đủ
+  Small/Medium/Large; `provided/` vẫn là external blocker vì giảng viên chưa cung cấp.
+- `output/`: metrics/panorama tái sinh khi Run All và bị Git ignore.
+- V0 build warning-clean bằng g++ 16.2; V1/V2/V3 CUDA chưa triển khai.
 
 ### 2.2 Lỗi chặn correctness/reproducibility
 
-- Notebook hiện sai JSON do escape `\sigma`, dùng thông tin nhóm mẫu và toàn bộ output rỗng.
-- Script preprocess không nhận tên `In1/In2`, `Out1/Out2`, `Free1/Free2`; môi trường hiện chưa có HEIC plugin.
-- Synthetic generator chưa lưu ground-truth homography.
-- ORB table hiện có 256 entries nhưng chỉ 133 cặp duy nhất.
-- V0 có thể truyền `H` chưa khởi tạo sang warping khi RANSAC thất bại.
-- `Image`/`GrayImage` sở hữu raw pointer nhưng chưa có copy/move contract an toàn.
-- Canvas hiện bị cắt kích thước âm thầm và thiếu kiểm tra finite/overflow.
-- Top-K chưa có tie-break deterministic giữa CPU và GPU.
-- `--runs` mặc định là 1, trái yêu cầu mặc định 5.
-- Amdahl hiện được tính từ tổng stage chia chính tổng stage, dẫn tới kết quả giả `999×`.
-- `MAX_CANDIDATES=500000` không phải bảo đảm toán học và vẫn có thể overflow.
-- Plan cũ chọn sẵn tối ưu trước profiling và gộp nhiều thay đổi trong cùng version.
+Các blocker Phase A/B đã được đóng và có regression test:
 
-Tất cả mục trên thuộc Phase A và phải được giải quyết trước khi gọi V0 là “golden baseline”.
+- Notebook hợp lệ, đúng Group 19, có outputs thật và source/package hash.
+- Synthetic GT có projected-grid RMSE ở cả ba độ phân giải.
+- ORB pattern chuẩn có 256 cặp duy nhất, attribution BSD-3-Clause.
+- RAII move-only, failure propagation, canvas/finite checks và deterministic Top-K.
+- FAST-9 shortcut đúng cho cung 9 điểm; RANSAC refit từ toàn bộ consensus inliers.
+- Mặc định 1 warm-up + 5 timed runs; report Avg/Median/Min.
+- Amdahl dùng S1+S2+S6 đo bằng median trên end-to-end nên luôn hữu hạn.
+- Ba standard sites và challenging pair đều có timing đủ ba độ phân giải.
+- Homography ảnh thật được đối chiếu độc lập với OpenCV và kiểm tra nhất quán
+  trong hệ tọa độ chuẩn hóa.
+
+Blocker duy nhất ngoài nhóm ở thời điểm khóa Midterm là dataset `provided/`.
 
 ---
 
@@ -131,7 +139,7 @@ Tất cả mục trên thuộc Phase A và phải được giải quyết trư�
 - `Descriptor`: `alignas(16)` và chứa `uint32_t words[8]`; CPU dùng popcount tương đương, CUDA dùng `__popc`.
 - `Homography`: lưu `H_A_to_B[9]`, có hàm normalize/finite/invertibility validation.
 - `PipelineDiagnostics`: keypoint A/B, matches, inliers, inlier ratio, H, status và warning.
-- `TimingSummary`: Avg/Min cho sáu stage, kernel total, H2D, control copy, D2H, end-to-end và one-time setup.
+- `TimingSummary`: Avg/Median/Min cho sáu stage, kernel total, H2D, control copy, D2H, end-to-end và one-time setup.
 - `PipelineResult`: panorama + diagnostics + timings.
 - Dispatcher công khai: `run_pipeline_version(version, inputs, config)`; các version dùng chung orchestration thay vì copy toàn bộ pipeline.
 
@@ -191,8 +199,8 @@ Prj/
 │   ├── challenging/
 │   └── provided/
 ├── notebooks/
-│   ├── GroupXX_Midterm.ipynb
-│   └── GroupXX_Final.ipynb
+│   ├── Group19_Midterm.ipynb
+│   └── Group19_Final.ipynb
 ├── output/
 ├── Makefile
 ├── requirements.txt
@@ -264,7 +272,7 @@ Quy tắc chụp: đứng một vị trí và xoay camera, overlap 30–50%, kh�
 
 Chạy synthetic và ba site ở Small/Medium/Large. Với bảng Midterm chính, report sáu stage:
 
-| Stage | 720p Avg/Min | 1080p Avg/Min | 4K Avg/Min |
+| Stage | 720p Median [Avg/Min] | 1080p Median [Avg/Min] | 4K Median [Avg/Min] |
 |---|---:|---:|---:|
 | Preprocess | | | |
 | FAST + NMS + Top-K | | | |
@@ -277,16 +285,19 @@ Chạy synthetic và ba site ở Small/Medium/Large. Với bảng Midterm chính
 Amdahl:
 
 ```text
-p = tổng thời gian các stage dự kiến chuyển GPU / V0 end-to-end
+p = median(S1 + S2 + S6) / median(V0 end-to-end)
 S_max = 1 / (1 - p)
 ```
 
-Nếu serial fraction nhỏ hơn độ phân giải đo, report “idealized unbounded / below measurement resolution” và giải thích transfer/setup thực tế sẽ giới hạn speedup; không in `999×`.
+S1/S2/S6 là tập hot-stage bảo thủ được chọn từ profile Medium/Large. S3-S5
+và host overhead thuộc serial fraction, vì vậy `S_max` phải hữu hạn. Transfer,
+launch và synchronization chưa có trong V0 vẫn phải được giải thích là chi phí
+làm speedup thực tế thấp hơn giới hạn này.
 
 ### Quality gate A
 
 - CPU build thành công trên Colab và không warning nghiêm trọng.
-- Synthetic Small grid-RMSE so với GT ≤1 px; normalized RMSE mọi size ≤0,1% đường chéo.
+- Synthetic grid-RMSE mọi size ≤1 px; normalized RMSE mọi size ≤0,1% đường chéo.
 - Ba standard pairs tạo panorama hoặc được ghi rõ low-confidence/failure với lý do.
 - Kết quả giữa năm runs deterministic về counts/H trong tolerance.
 - Unit/integration tests Phase A pass.
@@ -306,10 +317,11 @@ Nếu serial fraction nhỏ hơn độ phân giải đo, report “idealized unb
 | V0 design | Interface, đoạn code ngắn cần thiết, không copy toàn source |
 | Correctness | Synthetic ground-truth homography error |
 | Panoramas | Một output cho mỗi site của nhóm |
-| Profiling | Per-stage Avg/Min ở ba resolution, hot-stage analysis |
+| Profiling | Per-stage Avg/Median/Min của synthetic và mọi ảnh thật ở ba resolution, hot-stage scaling |
 | Amdahl | p, giới hạn lý thuyết và hạn chế của ước lượng |
-| Dataset | Registered sites, prepared pairs, challenging pair và Drive link |
-| GPU plan | Stage mapping V1; candidate tối ưu được trình bày là giả thuyết chờ profiling |
+| Dataset | Bối cảnh chụp, overlap, loại thử thách, prepared pairs, challenging pair và Drive link |
+| Real-image H | Đối chiếu OpenCV `findHomography` và cross-resolution consistency; không gọi reference là ground truth |
+| GPU plan | Stage mapping V1; profiling evidence; 2–3 candidate tối ưu kèm rủi ro/mitigation |
 
 ### B2. Notebook execution contract
 
@@ -318,13 +330,13 @@ Nếu serial fraction nhỏ hơn độ phân giải đo, report “idealized unb
 - Cài dependency, tạo output, generate synthetic, build, run benchmark, parse JSON, vẽ bảng/biểu đồ tự động.
 - `Runtime → Run all` trên fresh Colab T4 thành công sau khi source/dataset được cung cấp.
 - Mọi output được lưu trong file nộp; mọi số trong markdown xuất phát từ output cell.
-- Thay toàn bộ `GroupXX`, tên/MSSV mẫu và link placeholder trước khi nộp.
+- Group, tên/MSSV và link dataset phải là thông tin thật; không để placeholder.
 
 ### B3. Package
 
 ```text
-GroupXX_Midterm.zip
-├── GroupXX_Midterm.ipynb
+Group19_Midterm.zip
+├── Group19_Midterm.ipynb
 └── src/
     ├── common.h
     ├── cuda_utils.cuh
@@ -338,10 +350,14 @@ GroupXX_Midterm.zip
 
 ### Quality gate B
 
-- Notebook hợp lệ theo `nbformat`, Run All pass và output saved.
-- V0 correctness, panorama, timing, hot stages và Amdahl đầy đủ.
-- Zip đúng tên/cấu trúc và build từ source duy nhất.
-- Không bắt đầu V1 trước khi gate này đạt hoặc Midterm đã được nộp an toàn.
+- [x] Notebook hợp lệ theo `nbformat`, 28/28 cells hợp lệ, mọi code cell
+  đã execute, không có error output.
+- [x] V0 correctness, panorama, timing ba resolution, hot-stage scaling,
+  OpenCV cross-check và Amdahl hữu hạn đầy đủ.
+- [x] Zip đúng tên/cấu trúc, integrity pass và build từ source duy nhất.
+- [x] Attribution ở header, notebook và `THIRD_PARTY_NOTICES.md`.
+
+Phase C chỉ bắt đầu từ commit kế tiếp sau khi archive Midterm được lưu an toàn.
 
 ---
 
@@ -392,7 +408,7 @@ Descriptor/keypoint/match arrays không round-trip về Host. Các control copy 
 
 ### C4. V1 evidence
 
-- Timing Avg/Min: từng stage, kernel total, H2D, control, D2H, end-to-end.
+- Timing Avg/Median/Min: từng stage, kernel total, H2D, control, D2H, end-to-end.
 - Speedup V1/V0 ở ba resolution.
 - Projected-grid RMSE với V0/GT và panorama similarity.
 - Nsight Systems timeline xác định stage chi phối; Nsight Compute lấy metrics cho các candidate bottleneck.
@@ -471,7 +487,7 @@ Chỉ làm khi V0–V3 hoàn chỉnh và còn đủ thời gian:
 1. Bottleneck: số liệu của version trước.
 2. Idea: một tối ưu và lý do phần cứng.
 3. Implementation: thay đổi kernel/data movement.
-4. Result: correctness, Avg/Min, speedup-vs-V0 và speedup-vs-previous.
+4. Result: correctness, Avg/Median/Min, speedup-vs-V0 và speedup-vs-previous.
 5. Analysis: kỳ vọng so với thực tế, profiler explanation và trade-off.
 
 ---
@@ -531,7 +547,7 @@ Upload YouTube Unlisted; link xuất hiện trong notebook và README, không up
 
 ### E5. Final package
 
-- `GroupXX_Final.ipynb` với outputs saved và Run All pass.
+- `Group19_Final.ipynb` với outputs saved và Run All pass.
 - PDF export của notebook.
 - Toàn bộ `.cpp/.cu/.h/.cuh` cần thiết.
 - README: dependencies, CUDA, build, usage, hardware, expected outputs và video link.
@@ -574,7 +590,7 @@ Upload YouTube Unlisted; link xuất hiện trong notebook và README, không up
 
 - `--runs 5` thực hiện đúng năm timed runs sau warm-up.
 - Atomic counters không tích lũy giữa runs.
-- Avg/Min hữu hạn, Min ≤ Avg.
+- Avg/Median/Min hữu hạn, Min ≤ Median; giữ raw runs để audit nhiễu.
 - Kernel total nhất quán với tổng stage trong tolerance đo.
 - End-to-end bao gồm transfer/control đã khai báo và loại disk I/O.
 - Không đặt speedup tối thiểu bắt buộc: version chậm hơn vẫn hợp lệ nếu correctness giữ nguyên và analysis trung thực.
@@ -656,20 +672,20 @@ Không trả lời “đây là phần của thành viên khác”.
 ### Inputs bên ngoài còn thiếu
 
 - [ ] Dataset giảng viên trong `dataset/provided/`.
-- [ ] Challenging pair của nhóm.
-- [ ] Tên/MSSV/GroupXX thật và dataset Drive link.
-- [ ] Deadline chính thức để khóa lịch nội bộ.
+- [x] Challenging pair của nhóm.
+- [x] Tên/MSSV/Group 19 thật và dataset Drive link.
+- [x] Mốc nộp Midterm: cuối tuần 7 theo đề; nhóm tự khóa archive trước khi nộp.
 
-### Thứ tự công việc sau khi plan được duyệt
+### Trạng thái thực thi
 
-- [ ] A0 — dependency, Makefile, provenance contract.
-- [ ] A1 — manifest + HEIC preprocessing.
-- [ ] A2 — synthetic ground truth.
-- [ ] A3 — sửa core types và sáu stage V0.
-- [ ] A4 — tests + V0 benchmark/metrics.
-- [ ] Gate A.
-- [ ] Phase B Midterm notebook/package.
-- [ ] Gate B.
+- [x] A0 — dependency, Makefile, provenance contract.
+- [x] A1 — manifest + preprocessing 4 real pairs × 3 resolutions.
+- [x] A2 — synthetic ground truth.
+- [x] A3 — core types và sáu stage V0.
+- [x] A4 — tests + V0 benchmark/metrics + OpenCV reference audit.
+- [x] Gate A.
+- [x] Phase B Midterm notebook/package.
+- [x] Gate B.
 - [ ] Phase C V1 CUDA.
 - [ ] Gate C + profiling.
 - [ ] Phase D V2 rồi V3 theo profiling.
@@ -679,11 +695,9 @@ Không trả lời “đây là phần của thành viên khác”.
 
 - V0, V1 và ít nhất hai optimized versions build từ một source tree.
 - Mọi version đạt correctness contract và không có memory/CUDA error.
-- Benchmark đủ ba resolution, cùng GPU/session, có Avg/Min và hai loại speedup.
+- Benchmark đủ ba resolution, cùng GPU/session, có Avg/Median/Min và hai loại speedup.
 - Mỗi optimized version có profiling evidence và đúng một thay đổi chính.
 - Notebook Midterm/Final Run All, output saved và không có số liệu điền tay.
 - Gallery, failure analysis, provided dataset, README, PDF, slides, video và attribution đầy đủ.
 
 ---
-
-

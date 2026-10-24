@@ -3,7 +3,9 @@
 ============================================================================
 CSC14120 - Parallel Programming
 Script: Generate Synthetic Image Pair with Ground-Truth Homography
-Authors: GroupXX (Members A, B, C)
+Authors: Pham Minh Thong (23120364), Nguyen Le Tan Tien (23120369),
+         Dao Quoc Tuan (23120392)
+External sources: Pillow and NumPy API documentation; no copied code.
 Description:
   - Generates a corner-rich synthetic scene at 3 resolutions (720p, 1080p, 4K)
   - Uses a rigorous projective transform (Homography H_A_to_B)
@@ -172,9 +174,9 @@ def generate_synthetic_pair_for_res(res_name: str, w: int, h: int, out_dir: str)
     right_path = os.path.join(out_dir, f"right_{res_name}.jpg")
     img_A.save(left_path, format='JPEG', quality=95)
     img_B.save(right_path, format='JPEG', quality=95)
-    print(f"[OK] Generated synthetic {res_name}:")
-    print(f"     Left:  {left_path} ({w}x{h})")
-    print(f"     Right: {right_path} ({w}x{h})")
+    print(f"[OK] Đã sinh ảnh tổng hợp {res_name}:")
+    print(f"     Trái (Left):  {left_path} ({w}x{h})")
+    print(f"     Phải (Right): {right_path} ({w}x{h})")
 
     # 6. Tạo validation grid points trên vùng overlap
     # Vùng overlap x thuộc [0.2*w, 0.9*w], y thuộc [0.1*h, 0.9*h]
@@ -240,7 +242,7 @@ def main():
     with open(gt_json_path, 'w', encoding='utf-8') as f:
         json.dump(all_metadata, f, indent=2)
 
-    print(f"\n[Success] Ground-truth metadata written to: {gt_json_path}")
+    print(f"\n[Thành công] Đã ghi siêu dữ liệu Ground-truth tới: {gt_json_path}")
 
 if __name__ == '__main__':
     main()

@@ -2,8 +2,10 @@
 // CSC14120 - Parallel Programming
 // Project: Panorama Image Stitching
 // Module: V0 Sequential Baseline Implementation (Plan v4)
-// Authors: GroupXX (Members A, B, C)
-// License: Apache-2.0 / BSD (ORB pattern adapted from Willow Garage / OpenCV)
+// Authors: Pham Minh Thong (23120364), Nguyen Le Tan Tien (23120369),
+//          Dao Quoc Tuan (23120392)
+// External sources: OpenCV bit_pattern_31_ (BSD-3-Clause); FAST, ORB and
+// normalized-DLT papers are algorithm references only. See THIRD_PARTY_NOTICES.md.
 // ============================================================================
 
 #include "v0_sequential.h"
@@ -16,6 +18,7 @@
 #include <sstream>
 #include <limits>
 #include <chrono>
+#include <array>
 
 // ============================================================================
 // BẢNG MẪU 256 CẶP TỌA ĐỘ CHUẨN OPENCV (bit_pattern_31_)
@@ -158,7 +161,10 @@ static bool is_fast_corner(const float* img, int w, int h, int x, int y, float t
                    (circle[4] < center_val - thresh) +
                    (circle[8] < center_val - thresh) +
                    (circle[12] < center_val - thresh);
-    if (brighter < 3 && darker < 3) return false;
+    // For FAST-9, any valid 9-pixel arc contains at least two of the four
+    // cardinal samples. Requiring three (the common FAST-12 shortcut) would
+    // incorrectly reject valid FAST-9 corners.
+    if (brighter < 2 && darker < 2) return false;
 
     // Kiểm tra cung 9 điểm liên tiếp
     int bright_run = 0, max_bright_run = 0;
@@ -561,6 +567,127 @@ static bool solve_dlt_8x8_cpu(const float ptsA[4][2], const float ptsB[4][2], fl
     return true;
 }
 
+// Refit a model from every RANSAC inlier instead of returning a noisy
+// four-point hypothesis. The eight free homography coefficients are solved by
+// normalized least squares in double precision; h33 is fixed to one.
+static bool solve_dlt_least_squares_cpu(
+        const std::vector<std::array<float, 2>>& ptsA,
+        const std::vector<std::array<float, 2>>& ptsB,
+        float H[9]) {
+    const size_t n = ptsA.size();
+    if (n < 4 || ptsB.size() != n) return false;
+
+    double cax = 0.0, cay = 0.0, cbx = 0.0, cby = 0.0;
+    for (size_t i = 0; i < n; i++) {
+        cax += ptsA[i][0]; cay += ptsA[i][1];
+        cbx += ptsB[i][0]; cby += ptsB[i][1];
+    }
+    cax /= n; cay /= n; cbx /= n; cby /= n;
+
+    double mean_a = 0.0, mean_b = 0.0;
+    for (size_t i = 0; i < n; i++) {
+        mean_a += std::hypot(ptsA[i][0] - cax, ptsA[i][1] - cay);
+        mean_b += std::hypot(ptsB[i][0] - cbx, ptsB[i][1] - cby);
+    }
+    mean_a /= n;
+    mean_b /= n;
+    if (mean_a < 1e-9 || mean_b < 1e-9) return false;
+
+    const double sa = std::sqrt(2.0) / mean_a;
+    const double sb = std::sqrt(2.0) / mean_b;
+    double normal[8][9] = {};
+
+    for (size_t i = 0; i < n; i++) {
+        const double x = sa * (ptsA[i][0] - cax);
+        const double y = sa * (ptsA[i][1] - cay);
+        const double u = sb * (ptsB[i][0] - cbx);
+        const double v = sb * (ptsB[i][1] - cby);
+        const double rows[2][8] = {
+            {x, y, 1.0, 0.0, 0.0, 0.0, -u * x, -u * y},
+            {0.0, 0.0, 0.0, x, y, 1.0, -v * x, -v * y}
+        };
+        const double rhs[2] = {u, v};
+        for (int eq = 0; eq < 2; eq++) {
+            for (int r = 0; r < 8; r++) {
+                for (int c = 0; c < 8; c++) {
+                    normal[r][c] += rows[eq][r] * rows[eq][c];
+                }
+                normal[r][8] += rows[eq][r] * rhs[eq];
+            }
+        }
+    }
+
+    for (int col = 0; col < 8; col++) {
+        int pivot_row = -1;
+        double best_ratio = 0.0;
+        for (int r = col; r < 8; r++) {
+            double row_scale = 0.0;
+            for (int c = col; c < 8; c++) {
+                row_scale = std::max(row_scale, std::abs(normal[r][c]));
+            }
+            if (row_scale <= 1e-15) continue;
+            const double ratio = std::abs(normal[r][col]) / row_scale;
+            if (ratio > best_ratio) {
+                best_ratio = ratio;
+                pivot_row = r;
+            }
+        }
+        if (pivot_row < 0 || std::abs(normal[pivot_row][col]) < 1e-12) {
+            return false;
+        }
+        if (pivot_row != col) {
+            for (int c = col; c <= 8; c++) {
+                std::swap(normal[col][c], normal[pivot_row][c]);
+            }
+        }
+        for (int r = col + 1; r < 8; r++) {
+            const double factor = normal[r][col] / normal[col][col];
+            for (int c = col; c <= 8; c++) {
+                normal[r][c] -= factor * normal[col][c];
+            }
+        }
+    }
+
+    double ht[9] = {};
+    ht[8] = 1.0;
+    for (int r = 7; r >= 0; r--) {
+        double value = normal[r][8];
+        for (int c = r + 1; c < 8; c++) value -= normal[r][c] * ht[c];
+        ht[r] = value / normal[r][r];
+    }
+
+    const double TA[9] = {sa, 0.0, -sa * cax,
+                          0.0, sa, -sa * cay,
+                          0.0, 0.0, 1.0};
+    const double invTB[9] = {1.0 / sb, 0.0, cbx,
+                             0.0, 1.0 / sb, cby,
+                             0.0, 0.0, 1.0};
+    double middle[9] = {}, denorm[9] = {};
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) {
+            for (int k = 0; k < 3; k++) {
+                middle[r * 3 + c] += ht[r * 3 + k] * TA[k * 3 + c];
+            }
+        }
+    }
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) {
+            for (int k = 0; k < 3; k++) {
+                denorm[r * 3 + c] += invTB[r * 3 + k] * middle[k * 3 + c];
+            }
+        }
+    }
+    if (!std::isfinite(denorm[8]) || std::abs(denorm[8]) < 1e-12) return false;
+    const double inv_h33 = 1.0 / denorm[8];
+    for (int i = 0; i < 9; i++) {
+        const double value = denorm[i] * inv_h33;
+        if (!std::isfinite(value)) return false;
+        H[i] = static_cast<float>(value);
+    }
+    H[8] = 1.0f;
+    return true;
+}
+
 // Deterministic LCG PRNG for repeatable RANSAC sampling across CPU and GPU
 struct LcgRng {
     uint32_t state;
@@ -660,6 +787,50 @@ bool stage5_ransac_homography_cpu(const std::vector<Match>& matches,
         if (inliers > max_inliers) {
             max_inliers = inliers;
             std::memcpy(opt_H, current_H, 9 * sizeof(float));
+        }
+    }
+
+    // Refit from the complete consensus set. A raw four-point hypothesis can
+    // have many inliers yet still vary noticeably across image resolutions.
+    if (max_inliers >= 4) {
+        std::vector<std::array<float, 2>> inlier_a;
+        std::vector<std::array<float, 2>> inlier_b;
+        inlier_a.reserve(max_inliers);
+        inlier_b.reserve(max_inliers);
+        const float threshold_sq = RANSAC_THRESH * RANSAC_THRESH;
+        for (const Match& match : matches) {
+            const Keypoint& a = kpA[match.idx_a];
+            const Keypoint& b = kpB[match.idx_b];
+            const float w = opt_H[6] * a.x + opt_H[7] * a.y + opt_H[8];
+            if (std::abs(w) < 1e-6f) continue;
+            const float px = (opt_H[0] * a.x + opt_H[1] * a.y + opt_H[2]) / w;
+            const float py = (opt_H[3] * a.x + opt_H[4] * a.y + opt_H[5]) / w;
+            const float dx = px - b.x;
+            const float dy = py - b.y;
+            if (dx * dx + dy * dy < threshold_sq) {
+                inlier_a.push_back({a.x, a.y});
+                inlier_b.push_back({b.x, b.y});
+            }
+        }
+
+        float refined_H[9];
+        if (solve_dlt_least_squares_cpu(inlier_a, inlier_b, refined_H)) {
+            int refined_inliers = 0;
+            for (const Match& match : matches) {
+                const Keypoint& a = kpA[match.idx_a];
+                const Keypoint& b = kpB[match.idx_b];
+                const float w = refined_H[6] * a.x + refined_H[7] * a.y + refined_H[8];
+                if (std::abs(w) < 1e-6f) continue;
+                const float px = (refined_H[0] * a.x + refined_H[1] * a.y + refined_H[2]) / w;
+                const float py = (refined_H[3] * a.x + refined_H[4] * a.y + refined_H[5]) / w;
+                const float dx = px - b.x;
+                const float dy = py - b.y;
+                if (dx * dx + dy * dy < threshold_sq) refined_inliers++;
+            }
+            if (refined_inliers >= max_inliers) {
+                std::memcpy(opt_H, refined_H, 9 * sizeof(float));
+                max_inliers = refined_inliers;
+            }
         }
     }
 
@@ -889,6 +1060,11 @@ bool PipelineResult::export_metrics_json(const std::string& json_path) const {
     ofs << "  \"image_height\": " << image_height << ",\n";
     ofs << "  \"runs\": " << runs << ",\n";
     ofs << "  \"warmups\": " << warmups << ",\n";
+    ofs << "  \"amdahl_model\": \"Selected hot stages S1+S2+S6 over median end-to-end\",\n";
+    ofs << "  \"amdahl_parallel_fraction\": " << std::fixed << std::setprecision(6)
+        << amdahl_parallel_fraction << ",\n";
+    ofs << "  \"amdahl_smax\": " << std::fixed << std::setprecision(3)
+        << amdahl_max_speedup << ",\n";
     ofs << "  \"status\": \"" << status_to_string(diagnostics.status) << "\",\n";
     ofs << "  \"warning\": \"" << diagnostics.warning << "\",\n";
     ofs << "  \"keypoints_a\": " << diagnostics.keypoints_a << ",\n";
@@ -906,7 +1082,8 @@ bool PipelineResult::export_metrics_json(const std::string& json_path) const {
     ofs << "  \"timing_ms\": {\n";
     auto write_metric = [&ofs](const char* name, const StageMetric& m, bool comma = true) {
         ofs << "    \"" << name << "\": {\"avg\": " << std::fixed << std::setprecision(3) 
-            << m.avg << ", \"min\": " << m.min << "}" << (comma ? ",\n" : "\n");
+            << m.avg << ", \"median\": " << m.median << ", \"min\": " << m.min << "}"
+            << (comma ? ",\n" : "\n");
     };
 
     write_metric("stage1_preprocess", timings.stage1_preprocess);
@@ -1037,7 +1214,12 @@ PipelineResult run_v0_pipeline(const Image& imgA,
             sum += v;
             min_val = std::min(min_val, v);
         }
-        return {sum / runs, min_val};
+        std::vector<float> sorted = vec;
+        std::sort(sorted.begin(), sorted.end());
+        const float median = (runs % 2 == 1)
+            ? sorted[runs / 2]
+            : 0.5f * (sorted[runs / 2 - 1] + sorted[runs / 2]);
+        return {sum / runs, median, min_val};
     };
 
     result.timings.stage1_preprocess       = compute_stat(t_s1);
@@ -1056,10 +1238,21 @@ PipelineResult run_v0_pipeline(const Image& imgA,
     result.timings.kernel_total = compute_stat(t_total);
 
     // H2D, control, d2h, setup cho V0 CPU đều là 0
-    result.timings.h2d     = {0.0f, 0.0f};
-    result.timings.control = {0.0f, 0.0f};
-    result.timings.d2h     = {0.0f, 0.0f};
-    result.timings.setup   = {0.0f, 0.0f};
+    result.timings.h2d     = {0.0f, 0.0f, 0.0f};
+    result.timings.control = {0.0f, 0.0f, 0.0f};
+    result.timings.d2h     = {0.0f, 0.0f, 0.0f};
+    result.timings.setup   = {0.0f, 0.0f, 0.0f};
+
+    const float selected_hot_time =
+        result.timings.stage1_preprocess.median +
+        result.timings.stage2_fast_nms_topk.median +
+        result.timings.stage6_warping_blending.median;
+    const float e2e_time = result.timings.end_to_end.median;
+    result.amdahl_parallel_fraction = (e2e_time > 0.0f)
+        ? std::clamp(selected_hot_time / e2e_time, 0.0f, 0.999999f)
+        : 0.0f;
+    result.amdahl_max_speedup =
+        1.0f / (1.0f - result.amdahl_parallel_fraction);
 
     return result;
 }
