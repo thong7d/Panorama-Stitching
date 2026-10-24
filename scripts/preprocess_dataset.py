@@ -98,6 +98,24 @@ def main():
     with open(manifest_path, 'r', encoding='utf-8') as f:
         manifest = json.load(f)
 
+    # Tự động khắc phục capture_location nếu tệp manifest tải từ Drive bị thiếu
+    default_locations = {
+        "site1_indoor": "Indoor residential kitchen/utility room (exact GPS not recorded)",
+        "site2_outdoor": "Outdoor open field (exact GPS not recorded)",
+        "site3_custom": "Outdoor building courtyard/residential area (exact GPS not recorded)",
+        "challenging": "Urban rooftop at night (exact GPS not recorded)",
+    }
+    manifest_dirty = False
+    for pair in manifest.get("pairs", []):
+        pid = pair.get("id")
+        if pid in default_locations and not pair.get("capture_location"):
+            pair["capture_location"] = default_locations[pid]
+            manifest_dirty = True
+    if manifest_dirty:
+        with open(manifest_path, 'w', encoding='utf-8') as f:
+            json.dump(manifest, f, indent=2, ensure_ascii=False)
+        print("[TỰ ĐỘNG KHẮC PHỤC] Đã tự động bổ sung trường 'capture_location' còn thiếu vào manifest.json.")
+
     all_success = True
     processed_count = 0
 
