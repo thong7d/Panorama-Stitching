@@ -519,19 +519,15 @@ assert set(ground_truth) == {"small", "medium", "large"}
 print("[OK] Ảnh tổng hợp nhân tạo và ma trận Ground-truth chuẩn xác đã sẵn sàng.")
 """))
 
-    # Mục 4: Biên dịch & Quality Gate A
+    # Mục 4: Biên dịch bản tuần tự V0 (V0 Compilation & Verification)
     cells.append(nbf.v4.new_markdown_cell(r"""---
-## 4. BIÊN DỊCH & QUALITY GATE A (KIỂM THỬ ĐƠN VỊ & TÍCH HỢP)
+## 4. BIÊN DỊCH BẢN TUẦN TỰ V0 (V0 COMPILATION & VERIFICATION)
+Biên dịch mã nguồn V0 tuần tự (C++) bằng trình biên dịch chuẩn (`g++` / `clang++` / `nvcc`) với cờ tối ưu hóa `-O3` theo đúng quy chuẩn Kế hoạch v4.
 """))
 
-    cells.append(nbf.v4.new_code_cell("""# 4.1 Chạy kiểm thử tích hợp Python (Manifest, Synthetic GT, Ảnh tiền xử lý)
-run_checked([sys.executable, "tests/test_scripts.py"])
-"""))
-
-    cells.append(nbf.v4.new_code_cell("""# 4.2 Biên dịch mã nguồn V0 đã nộp và thực thi các kiểm thử hồi quy C++
+    cells.append(nbf.v4.new_code_cell("""# 4.1 Biên dịch mã nguồn V0 đã nộp và kiểm tra thông tin trợ giúp (help)
 EXE_SUFFIX = ".exe" if os.name == "nt" else ""
 STITCH_BINARY = Path(f"stitch{EXE_SUFFIX}").resolve()
-TEST_BINARY = Path(f"test_cpu{EXE_SUFFIX}").resolve()
 base_flags = [
     "-O3", "-std=c++17", "-Wall", "-Wextra", "-Wpedantic", "-Werror",
     "-Wno-missing-field-initializers",
@@ -544,12 +540,7 @@ run_checked([
     "src/main.cu", "src/stb_impl.cpp", "src/v0_sequential.cpp",
     "-o", str(STITCH_BINARY),
 ])
-run_checked([
-    CXX, *base_flags, "-x", "c++", "-Isrc",
-    "tests/test_cpu.cpp", "src/stb_impl.cpp", "src/v0_sequential.cpp",
-    "-o", str(TEST_BINARY),
-])
-run_checked([str(TEST_BINARY)])
+run_checked([str(STITCH_BINARY), "--help"])
 print(f"[OK] Đã biên dịch sạch cảnh báo binary V0: {STITCH_BINARY}")
 """))
 

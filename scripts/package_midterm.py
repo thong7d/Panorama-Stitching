@@ -105,7 +105,6 @@ def package_midterm(group_name: str = "Group19", require_executed: bool = True):
                      "validate_homography.py",
                      "build_midterm_notebook.py", "execute_notebook.py",
                      "package_midterm.py"]),
-        ("tests", ["test_cpu.cpp", "test_scripts.py"]),
     ]
 
     missing_paths = [

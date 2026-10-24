@@ -43,10 +43,13 @@ cpu: $(SRCS)
 	$(CXX) $(CXX_FLAGS) -x c++ $(SRCS) -o $(TARGET)
 	@echo "[OK] Build complete with C++ (CPU Host-only): ./$(TARGET)"
 
-# Build and execute CPU unit tests
-test: tests/test_cpu.cpp src/stb_impl.cpp src/v0_sequential.cpp
-	$(CXX) $(CXX_FLAGS) -x c++ -Isrc tests/test_cpu.cpp src/stb_impl.cpp src/v0_sequential.cpp -o $(TEST_TARGET)
-	./$(TEST_TARGET)
+# Build and execute CPU unit tests (if test sources are available)
+test:
+	@if [ -f tests/test_cpu.cpp ]; then \
+		$(CXX) $(CXX_FLAGS) -x c++ -Isrc tests/test_cpu.cpp src/stb_impl.cpp src/v0_sequential.cpp -o $(TEST_TARGET) && ./$(TEST_TARGET); \
+	else \
+		echo "[INFO] tests/test_cpu.cpp không nằm trong gói nộp bài (chỉ dùng cho kiểm thử nội bộ)."; \
+	fi
 
 clean:
 	rm -f $(TARGET) $(TEST_TARGET) *.o *.obj
