@@ -24,7 +24,14 @@ SRCS = src/main.cu src/stb_impl.cpp src/v0_sequential.cpp
 TARGET = stitch
 TEST_TARGET = test_cpu
 
-all: cuda
+HAS_NVCC := $(shell which $(NVCC) 2>/dev/null)
+
+all:
+ifdef HAS_NVCC
+	@$(MAKE) cuda
+else
+	@$(MAKE) cpu
+endif
 
 # Build CUDA binary for Google Colab Tesla T4
 cuda: $(SRCS)
