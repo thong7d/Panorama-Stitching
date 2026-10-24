@@ -91,7 +91,6 @@ def package_midterm(group_name: str = "Group19", require_executed: bool = True):
         (WORKSPACE_ROOT / "Makefile", "Makefile"),
         (WORKSPACE_ROOT / "README.md", "README.md"),
         (WORKSPACE_ROOT / "requirements.txt", "requirements.txt"),
-        (WORKSPACE_ROOT / "project_plan_v4.md", "project_plan_v4.md"),
         (WORKSPACE_ROOT / "THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"),
     ]
 
@@ -102,9 +101,7 @@ def package_midterm(group_name: str = "Group19", require_executed: bool = True):
                  "v0_sequential.h", "v0_sequential.cpp"]),
         ("scripts", ["preprocess_dataset.py", "generate_synthetic_test.py", 
                      "orb_pattern_data.py", "validate_metrics.py",
-                     "validate_homography.py",
-                     "build_midterm_notebook.py", "execute_notebook.py",
-                     "package_midterm.py"]),
+                     "validate_homography.py", "package_midterm.py"]),
     ]
 
     missing_paths = [

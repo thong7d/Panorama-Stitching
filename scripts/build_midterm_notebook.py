@@ -818,7 +818,7 @@ plt.show()
 ## 8. KẾ HOẠCH TRIỂN KHAI GPU (PHASES C, D, E) (GPU IMPLEMENTATION PLAN)
 
 ### 8.1 Lựa chọn dựa trên phân tích đo đạc (Profiling evidence)
-Dựa trên số liệu đo đạc thực tế tại Cell 6.3: **S1, S2 và S6 là các mục tiêu tối ưu hóa đầu tiên** vì thời gian thực thi của chúng tăng theo độ phân giải và chiếm phần lớn thời gian (khoảng 70%–80% ở 1080p và đạt xấp xỉ 90%–94% ở 4K).  
+Dựa trên số liệu đo đạc thực tế tại Cell 6.3: **S1, S2 và S6 là các mục tiêu tối ưu hóa đầu tiên** vì thời gian thực thi của chúng tăng theo kích thước ảnh và chiếm 68.5%–80.0% thời gian V0 ở 1080p và 88.3%–94.0% ở 4K.  
 Phiên bản V1 sẽ chuyển toàn bộ cả 6 giai đoạn lên GPU để dữ liệu trung gian luôn thường trú trên bộ nhớ thiết bị; mô hình Amdahl bảo thủ tập trung tăng tốc S1/S2/S6 và giữ S3-S5 cùng chi phí truyền nhận ở dạng tuần tự.
 
 ### 8.2 Bảng phân bố luồng V1 (V1 Thread Mapping)
