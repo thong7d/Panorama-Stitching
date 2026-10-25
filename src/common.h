@@ -48,7 +48,7 @@
 // HẰNG SỐ BẤT BIẾN TOÀN DỰ ÁN (Plan v4 Section 3)
 // ============================================================================
 constexpr int DEFAULT_RUNS     = 5;        // Số runs mặc định theo Plan v4
-constexpr int DEFAULT_TOP_K    = 1000;     // K tối đa sau Top-K
+constexpr int DEFAULT_TOP_K    = 2000;     // K tối đa sau Top-K
 constexpr float FAST_THRESH    = 20.0f;    // Ngưỡng kiểm tra góc FAST-9
 constexpr int BORDER_MARGIN    = 20;       // Biên an toàn loại keypoint sát mép ảnh (bán kính ORB sau xoay)
 constexpr float RATIO_THRESH   = 0.75f;    // Lowe's ratio test threshold
@@ -233,6 +233,7 @@ inline const char* status_to_string(PipelineStatus s) {
 struct Homography {
     float h[9];
     bool is_valid = false;
+    bool used_translation_fallback = false;
 
     Homography() {
         for (int i = 0; i < 9; i++) h[i] = (i % 4 == 0) ? 1.0f : 0.0f;

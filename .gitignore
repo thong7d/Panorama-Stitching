@@ -35,3 +35,6 @@ dataset/*/*.heic
 # Reference textbooks (hosted on Google Drive)
 Szeliski_*.pdf
 Nayar,*.pdf
+
+*.pptx
+presentation_script.md

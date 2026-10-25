@@ -51,7 +51,7 @@ def create_midterm_notebook():
 
 | STT | Họ và tên | MSSV | Vai trò và nhiệm vụ cụ thể |
 |:---:|---|:---:|---|
-| 1 | **Phạm Minh Thông** (Nhóm trưởng) | 23120364 | Kiến trúc tổng thể, Quy trình tiền xử lý 16:9, Giai đoạn 1 (Lọc Gaussian) & Giai đoạn 5 (Hartley RANSAC DLT) |
+| 1 | **Phạm Minh Thông** (Nhóm trưởng) | 23120364 | Kiến trúc tổng thể, Quy trình tiền xử lý/crop 16:9, Giai đoạn 1 và Giai đoạn 5 (RANSAC DLT + kiểm tra hình học/fallback) |
 | 2 | **Nguyễn Lê Tấn Tiến** | 23120369 | Thu thập tập ảnh đa địa điểm & Manifest, Giai đoạn 2 (FAST-9 NMS Top-K) & Giai đoạn 3 (Mô tả ORB) |
 | 3 | **Đào Quốc Tuấn** | 23120392 | Giai đoạn 4 (Khớp Hamming 8x32-bit), Giai đoạn 6 (Chiếu ngược Bilinear), Bộ kiểm thử Benchmark & Phân tích Amdahl |
 
@@ -112,11 +112,11 @@ Mục tiêu của bài toán là ghép hai ảnh tĩnh có vùng chồng lấn (
                              ▼ Các cặp điểm tương đồng (Matches)
                   ┌─────────────────────┐
                   │ Giai đoạn 5:        │
-                  │ Ước lượng Homography│
-                  │ (RANSAC + Norm DLT) │
+                  │ Ước lượng biến đổi  │
+                  │ (RANSAC H / fallback│
                   └─────────────────────┘
                              │
-                             ▼ Ma trận tối ưu H_A_to_B (3x3)
+                             ▼ Ma trận biến đổi H_A_to_B (3x3)
                   ┌─────────────────────┐
                   │ Giai đoạn 6:        │ <─── [Ảnh gốc RGB A & B]
                   │ Chiếu hình & Trộn   │
@@ -133,10 +133,10 @@ Theo **Kế hoạch dự án Plan v4 Mục 3**, các tham số và quy ước to
 | Giai đoạn | Thuật toán / Phương pháp | Hợp đồng bất biến & Tham số khóa |
 |---|---|---|
 | **Giai đoạn 1** | Tiền xử lý (Preprocessing) | Mức xám chuẩn $Y = 0.299R + 0.587G + 0.114B$; Lọc nhiễu Gaussian 5×5 ($\sigma=1.0$), giới hạn biên boundary clamping. |
-| **Giai đoạn 2** | FAST-9 + NMS + Top-K | Ngưỡng góc FAST-9 $T=20$ trên đường tròn Bresenham 16 điểm; Non-Maximum Suppression 3×3; Tối đa $K=1000$ keypoints; Sắp xếp tất định: `(response GIẢM DẦN, linear_index TĂNG DẦN)`. |
+| **Giai đoạn 2** | FAST-9 + NMS + Top-K | Ngưỡng góc FAST-9 $T=20$ trên đường tròn Bresenham 16 điểm; Non-Maximum Suppression 3×3; Tối đa $K=2000$ keypoints; Sắp xếp tất định: `(response GIẢM DẦN, linear_index TĂNG DẦN)`. |
 | **Giai đoạn 3** | Oriented BRIEF / ORB | Kích thước patch $31\times 31$, góc định hướng từ Trọng tâm cường độ (Intensity Centroid) $[-\pi, \pi]$; Bảng 256 cặp kiểm tra chuẩn từ OpenCV `bit_pattern_31_`; Loại bỏ biên an toàn ($R < 20$ px). |
 | **Giai đoạn 4** | So khớp vét cạn Hamming | Descriptor 256-bit lưu dưới dạng 8 từ $\times$ 32-bit (`uint32_t words[8]`), tính khoảng cách bit bằng popcount; Kiểm định tỷ số Lowe (Lowe's Ratio Test): $\text{dist}_1 < 0.75 \times \text{dist}_2$. |
-| **Giai đoạn 5** | RANSAC Homography | 2000 lượt giả thuyết (hypotheses); DLT 4 điểm chuẩn hóa đẳng hướng Hartley; Khử Gauss từng phần (partial pivoting); Ngưỡng sai số chiếu lại $3.0$ px; Bộ sinh số ngẫu nhiên tất định LCG seed 42. |
+| **Giai đoạn 5** | RANSAC Homography + fallback tịnh tiến | 2000 giả thuyết; DLT 4 điểm chuẩn hóa Hartley; ngưỡng chiếu lại $3.0$ px; LCG seed 42. H được kiểm tra diện tích, pole và kích thước canvas; nếu suy biến thì dùng RANSAC tịnh tiến + median trên displacement đồng thuận. |
 | **Giai đoạn 6** | Chiếu ngược & Trộn mềm | Ánh xạ tọa độ ngược qua $H_{A\to B}$; Lấy mẫu nội suy song tuyến (Bilinear sampling); Trọng số làm mượt đối xứng (Symmetric feathering) theo khoảng cách tới cả 4 biên để triệt tiêu vết nối. |
 
 ### 1.4 Biện luận chất lượng cho các phương pháp đã chọn (Quality Rationale)
@@ -147,7 +147,7 @@ Theo **Kế hoạch dự án Plan v4 Mục 3**, các tham số và quy ước to
 | **S2** | FAST-9 mang lại các điểm góc có tính lặp lại rất cao trên các cạnh; NMS loại bỏ các cụm điểm phát hiện dư thừa và Top-K tất định giữ lại các bằng chứng hình học mạnh nhất. |
 | **S3** | Góc định hướng từ trọng tâm cường độ giúp BRIEF chống chịu được phép xoay camera, trong khi descriptor 256-bit đủ gọn nhẹ để thực hiện so khớp vét cạn toàn diện. |
 | **S4** | Khoảng cách Hamming tính chính xác độ sai biệt bit; Kiểm định tỷ số của Lowe loại bỏ triệt để các cặp ghép nhập nhằng do vân bề mặt lặp lại (repetitive textures). |
-| **S5** | RANSAC loại bỏ ngoại lai (outliers); Chuẩn hóa tọa độ Hartley cải thiện điều kiện số học của ma trận; Mô hình cuối cùng được tinh chỉnh lại (refit) từ toàn bộ tập inliers đồng thuận. |
+| **S5** | RANSAC loại ngoại lai; chuẩn hóa Hartley và refit cải thiện độ ổn định. Kiểm tra hình học ngăn H suy biến từ texture lặp; fallback tịnh tiến là mô hình hạn chế, tất định và phù hợp các cặp panorama quay ngang khi mục tiêu là đầu ra ổn định. |
 | **S6** | Ánh xạ ngược (Inverse mapping) ngăn chặn hiện tượng tạo lỗ thủng điểm ảnh; Nội suy song tuyến giảm răng cưa; Trộn mềm đối xứng xóa nhòa đường biên ghép nối. |
 
 ### 1.5 Biện luận tính phù hợp với GPU (GPU Suitability Rationale)
@@ -320,12 +320,12 @@ print(f"[OK] Đã xác thực các file mã nguồn và biên dịch bắt buộ
 
 | Cặp ảnh | Bối cảnh chụp thực tế | Độ chồng lấn ước lượng | Ý nghĩa thực nghiệm |
 |---|---|---:|---|
-| **Site 1** | Không gian kiến trúc nội thất (Indoor architectural scene) | 56% | Thị sai cận cảnh, bất liên tục về độ sâu, phơi sáng trong nhà |
-| **Site 2** | Không gian ngoại cảnh tự nhiên / địa hình mở (Natural open outdoor scene) | 66% | Bầu trời ít vân bề mặt, thảm cỏ lặp lại, mốc hình học thưa thớt |
-| **Site 3** | Cấu trúc hình học công trình đô thị (Urban residential exterior scene) | 51% | Phối cảnh sâu mạnh mẽ, độ sâu biến thiên, tán cây và nền trời sáng |
-| **Challenging** | Cảnh quan đô thị ban đêm độ tương phản cao (Low-light urban night scene) | 63% | Ánh sáng yếu, nhiễu hạt cảm biến, lóa đèn đường, hình học nhà lặp lại |
+| **Site 1** | Bếp/phòng tiện ích trong nhà | 38% | Thị sai cận cảnh, bất liên tục độ sâu, phơi sáng trong nhà |
+| **Site 2** | Mái nhà đô thị, mái ngói và đường chân trời | 33% | Bầu trời ít vân, mái ngói lặp, đặc trưng ở xa |
+| **Site 3** | Hành lang kỹ thuật trên sân thượng có lưới an toàn | 49% sau crop | Lưới lặp, phối cảnh sâu, nền trời sáng |
+| **Challenging** | Bếp/phòng làm việc cận cảnh trong nhà | 39% | Thị sai, che khuất cục bộ, nhiều mặt phẳng độ sâu |
 
-*Ghi chú về mức độ chồng lấn (51% – 66%):* Con số 30%–50% trong đề bài là khuyến nghị thực hành khi chụp ảnh (rule-of-thumb guideline) nhằm đảm bảo tối thiểu có đủ vùng giao thoa để tìm đặc trưng và không chụp quá trùng khít. Khi xoay camera tại chỗ một góc khoảng 20°–30° với trường nhìn (FOV) chuẩn của điện thoại, diện tích đa giác giao nhau tính từ ma trận Homography thực tế đo được là 51%–66%. Mức độ chồng lấn này hoàn toàn lý tưởng và đúng chuẩn, cung cấp đủ inliers phân bố đều để hệ phương trình DLT đạt độ ổn định số học tối ưu.
+*Cách ước lượng overlap:* Site 1, Site 2 và Challenging dùng displacement ngang robust của các match đồng thuận. Site 3 ban đầu được ước lượng khoảng 51.87%; bước tiền xử lý bỏ 2% mép giao nhau ở mỗi ảnh để đưa về khoảng 49% mà không sửa ảnh gốc. Đây là số liệu mô tả dataset; độ chính xác synthetic được đánh giá riêng bằng ground-truth.
 """))
 
     cells.append(nbf.v4.new_code_cell("""# 3.1 Cung cấp dataset: Hỗ trợ Google Drive Mount, tệp zip có sẵn, hoặc tải lên thủ công
@@ -341,14 +341,14 @@ manifest_path = Path("dataset/manifest.json")
 
 def check_raw_images_exist():
     expected_raw = [
-        Path("dataset/site1_indoor/In1.png"),
-        Path("dataset/site1_indoor/In2.png"),
-        Path("dataset/site2_outdoor/out1.png"),
-        Path("dataset/site2_outdoor/out2.png"),
-        Path("dataset/site3_custom/cus1.png"),
-        Path("dataset/site3_custom/cus2.png"),
-        Path("dataset/challenging/Cha1.png"),
-        Path("dataset/challenging/Cha2.png"),
+        Path("dataset/site1_indoor/in1.jpg"),
+        Path("dataset/site1_indoor/in2.jpg"),
+        Path("dataset/site2_outdoor/out1.jpg"),
+        Path("dataset/site2_outdoor/out2.jpg"),
+        Path("dataset/site3_custom/cus1.jpg"),
+        Path("dataset/site3_custom/cus2.jpg"),
+        Path("dataset/challenging/cha1.jpg"),
+        Path("dataset/challenging/cha2.jpg"),
     ]
     return all(p.is_file() for p in expected_raw)
 
@@ -365,7 +365,7 @@ if need_dataset and "google.colab" in sys.modules:
                 try:
                     with zipfile.ZipFile(candidate) as archive:
                         namelist = archive.namelist()
-                        if any("site1_indoor" in n or "In1.png" in n for n in namelist):
+                        if any("site1_indoor" in n or "in1.jpg" in n.lower() for n in namelist):
                             print(f"[GOOGLE DRIVE] Tìm thấy tệp zip dataset: {candidate.name}. Đang tự động giải nén...")
                             archive.extractall(Path.cwd())
                             break
@@ -390,7 +390,7 @@ if need_dataset and "google.colab" in sys.modules:
             try:
                 with zipfile.ZipFile(lz) as archive:
                     namelist = archive.namelist()
-                    if any("site1_indoor" in n or "In1.png" in n for n in namelist):
+                    if any("site1_indoor" in n or "in1.jpg" in n.lower() for n in namelist):
                         print(f"[TỰ ĐỘNG] Tìm thấy tệp zip dataset tại: {lz.name}. Đang giải nén...")
                         archive.extractall(Path.cwd())
                         break
@@ -421,45 +421,46 @@ if not manifest_path.is_file():
                 "id": "site1_indoor",
                 "kind": "standard",
                 "directory": "dataset/site1_indoor",
-                "left_raw": "In1.png",
-                "right_raw": "In2.png",
-                "description": "Group-captured indoor kitchen/utility-room panorama with cupboards, appliances, tiled walls and strong straight edges",
+                "left_raw": "in1.jpg",
+                "right_raw": "in2.jpg",
+                "description": "Group-captured indoor kitchen/utility-room panorama spanning a storage cabinet, doorway, work table and refrigerator",
                 "capture_location": "Indoor residential kitchen/utility room (exact GPS not recorded)",
-                "estimated_overlap_percent": 56,
+                "estimated_overlap_percent": 38,
                 "visual_challenges": ["near-field parallax", "depth discontinuities", "indoor exposure variation"]
             },
             {
                 "id": "site2_outdoor",
                 "kind": "standard",
                 "directory": "dataset/site2_outdoor",
-                "left_raw": "out1.png",
-                "right_raw": "out2.png",
-                "description": "Group-captured open-field panorama dominated by grassland, sky and a sparse tree line",
-                "capture_location": "Outdoor open field (exact GPS not recorded)",
-                "estimated_overlap_percent": 66,
-                "visual_challenges": ["large low-texture sky", "repetitive grass texture", "few distinctive landmarks"]
+                "left_raw": "out1.jpg",
+                "right_raw": "out2.jpg",
+                "description": "Group-captured urban rooftop panorama with tiled roofs, distant towers and a bright cloudy sky",
+                "capture_location": "Urban rooftop/terrace overlooking residential buildings (exact GPS not recorded)",
+                "estimated_overlap_percent": 33,
+                "visual_challenges": ["large low-texture sky", "repetitive roof tiles", "distant features"]
             },
             {
                 "id": "site3_custom",
                 "kind": "standard",
                 "directory": "dataset/site3_custom",
-                "left_raw": "cus1.png",
-                "right_raw": "cus2.png",
-                "description": "Group-captured outdoor courtyard/residential scene with a white facade, trees and neighboring buildings",
-                "capture_location": "Outdoor building courtyard/residential area (exact GPS not recorded)",
-                "estimated_overlap_percent": 51,
-                "visual_challenges": ["strong perspective", "depth variation", "foliage motion", "bright sky"]
+                "left_raw": "cus1.jpg",
+                "right_raw": "cus2.jpg",
+                "description": "Group-captured rooftop corridor panorama with building facades, utility boxes and a repetitive green safety mesh",
+                "capture_location": "Outdoor residential rooftop/service corridor (exact GPS not recorded)",
+                "estimated_overlap_percent": 49,
+                "overlap_crop_fraction": 0.02,
+                "visual_challenges": ["repetitive mesh texture", "strong perspective", "depth variation", "bright sky"]
             },
             {
                 "id": "challenging",
                 "kind": "challenging",
                 "directory": "dataset/challenging",
-                "left_raw": "Cha1.png",
-                "right_raw": "Cha2.png",
-                "description": "Group-captured urban rooftop panorama at night with buildings, point lights and dark foreground roofs",
-                "capture_location": "Urban rooftop at night (exact GPS not recorded)",
-                "estimated_overlap_percent": 63,
-                "visual_challenges": ["low light", "sensor noise", "lamp glare", "repetitive building geometry", "exposure imbalance"]
+                "left_raw": "cha1.jpg",
+                "right_raw": "cha2.jpg",
+                "description": "Group-captured close-range indoor panorama spanning a utility table, refrigerator, cooking area and laptop desk",
+                "capture_location": "Indoor residential kitchen/utility room (exact GPS not recorded)",
+                "estimated_overlap_percent": 39,
+                "visual_challenges": ["near-field parallax", "depth discontinuities", "partial occlusion", "indoor exposure variation"]
             },
             {
                 "id": "provided",
@@ -576,6 +577,7 @@ def run_benchmark(output_name, dataset_name, resolution):
         f"[OK] {output_name:11s} {resolution:6s}: "
         f"trạng thái={metrics['status']}, cặp khớp/inliers="
         f"{metrics['matches']}/{metrics['inliers']}, trung vị={median:.3f} ms, "
+        f"mô hình={metrics.get('transform_model', 'homography')}, "
         f"Smax={metrics['amdahl_smax']:.2f}x"
     )
 """))
@@ -648,7 +650,7 @@ stages = [
     ("Giai đoạn 2 (FAST+NMS+TopK)", "stage2_fast_nms_topk"),
     ("Giai đoạn 3 (Mô tả ORB)", "stage3_orb_descriptor"),
     ("Giai đoạn 4 (Khớp Hamming)", "stage4_matching"),
-    ("Giai đoạn 5 (RANSAC DLT)", "stage5_ransac"),
+    ("Giai đoạn 5 (RANSAC DLT/fallback)", "stage5_ransac"),
     ("Giai đoạn 6 (Chiếu & Trộn)", "stage6_warping_blending"),
     ("Tổng thời gian các Stage", "kernel_total"),
     ("Toàn quy trình End-to-End", "end_to_end")
@@ -750,19 +752,22 @@ print(
 )
 """))
 
-    cells.append(nbf.v4.new_code_cell("""# 6.4 Kiểm tra đối chiếu độc lập tính hợp lý của Homography với OpenCV
+    cells.append(nbf.v4.new_code_cell("""# 6.4 Đối chiếu độc lập mô hình biến đổi với OpenCV
 homography_report = Path("output/homography_reference.json")
 run_checked([
     sys.executable, "scripts/validate_homography.py",
     "--json-out", str(homography_report),
 ])
 reference = json.loads(homography_report.read_text())
-print("site | độ phân giải | số match/inlier tham chiếu | Độ lệch lưới V0 so với tham chiếu (% đường chéo)")
+print("site | độ phân giải | mô hình V0 | H tham chiếu hợp lệ? | match/inlier tham chiếu | Độ lệch lưới (% đường chéo)")
 for row in reference["comparisons"]:
+    disagreement = row["v0_reference_grid_disagreement_pct_diagonal"]
+    disagreement_text = f"{disagreement:.3f}" if np.isfinite(disagreement) else "N/A"
     print(
-        f"{row['site']} | {row['resolution']} | "
+        f"{row['site']} | {row['resolution']} | {row.get('v0_transform_model', 'homography')} | "
+        f"{row.get('reference_geometrically_plausible', False)} | "
         f"{row['reference_matches']}/{row['reference_inliers']} | "
-        f"{row['v0_reference_grid_disagreement_pct_diagonal']:.3f}"
+        f"{disagreement_text}"
     )
 print("\\nĐộ nhất quán của V0 qua các độ phân giải (Cross-resolution consistency):")
 for row in reference["consistency"]:
@@ -770,8 +775,10 @@ for row in reference["consistency"]:
         f"{row['site']} | {row['max_cross_resolution_grid_disagreement_pct_diagonal']:.3f}% đường chéo"
     )
 print(
-    "Diễn giải: Ảnh thật không có ma trận Ground-truth H. Do đó mô hình OpenCV SIFT + "
-    "findHomography là một mốc đối chiếu tính hợp lý độc lập chứ không phải chân lý tuyệt đối. "
+    "Diễn giải: Ảnh thật không có ma trận Ground-truth H. OpenCV SIFT + findHomography "
+    "chỉ là mốc tham chiếu độc lập. H tham chiếu không qua kiểm tra hình học được báo N/A thay vì "
+    "tạo ra một con số lệch lưới gây hiểu nhầm. Khi H projective bị từ chối, V0 chủ động "
+    "dùng translation_fallback để tránh canvas suy biến trên texture lặp hoặc cảnh có parallax. "
     "Độ lệch xuyên độ phân giải được đo sau khi chuẩn hóa hệ tọa độ; "
     "độ lệch lớn hơn ở các cảnh ít vân bề mặt cần được phân tích cùng với số lượng inlier "
     "và độ tự nhất quán xuyên độ phân giải của chính V0."
@@ -793,7 +800,7 @@ panoramas = [
     ("Site 1 Trong nhà (720p)", "output/site1/pano_small.jpg"),
     ("Site 2 Ngoài trời (720p)", "output/site2/pano_small.jpg"),
     ("Site 3 Tùy chọn (720p)", "output/site3/pano_small.jpg"),
-    ("Challenging Đêm (720p)", "output/challenging/pano_small.jpg"),
+    ("Challenging Trong nhà (720p)", "output/challenging/pano_small.jpg"),
 ]
 
 plt.figure(figsize=(12, 8), dpi=75)
@@ -818,7 +825,7 @@ plt.show()
 ## 8. KẾ HOẠCH TRIỂN KHAI GPU (PHASES C, D, E) (GPU IMPLEMENTATION PLAN)
 
 ### 8.1 Lựa chọn dựa trên phân tích đo đạc (Profiling evidence)
-Dựa trên số liệu đo đạc thực tế tại Cell 6.3: **S1, S2 và S6 là các mục tiêu tối ưu hóa đầu tiên** vì thời gian thực thi của chúng tăng theo kích thước ảnh và chiếm 68.5%–80.0% thời gian V0 ở 1080p và 88.3%–94.0% ở 4K.  
+Dựa trên bảng và biểu đồ được tính trực tiếp tại Cell 6.3, **S1, S2 và S6 là các mục tiêu tối ưu hóa đầu tiên** vì chi phí của chúng tăng theo số pixel và có mức song song dữ liệu cao. Tỷ lệ thực tế, hot stage và giới hạn Amdahl cho từng dataset/độ phân giải được in từ các tệp metrics ngay phía trên, không hard-code trong phần diễn giải.  
 Phiên bản V1 sẽ chuyển toàn bộ cả 6 giai đoạn lên GPU để dữ liệu trung gian luôn thường trú trên bộ nhớ thiết bị; mô hình Amdahl bảo thủ tập trung tăng tốc S1/S2/S6 và giữ S3-S5 cùng chi phí truyền nhận ở dạng tuần tự.
 
 ### 8.2 Bảng phân bố luồng V1 (V1 Thread Mapping)
@@ -829,7 +836,7 @@ Phiên bản V1 sẽ chuyển toàn bộ cả 6 giai đoạn lên GPU để dữ
 | **S2 (FAST + NMS + Top-K)** | Detector/NMS dạng 2D, thu gọn bounded compaction, khóa sắp xếp tất định | Tràn bộ đệm ứng viên và thứ tự atomic không tất định; cấp phát đúng dung lượng và tie-break ổn định |
 | **S3 (Mô tả ORB)** | 1 thread xử lý 1 keypoint, bảng mẫu lưu trong `__constant__` memory | Vùng patch xoay vượt ngoài biên ảnh; tái sử dụng điều kiện biên an toàn của V0 |
 | **S4 (Khớp đặc trưng)** | Phân khối tile 2D descriptor, chỉ thị phần cứng popcount, reduction tìm 2 điểm gần nhất | Sai lệch điểm nhì hoặc xử lý bằng điểm; kiểm thử hồi quy đối chiếu chính xác với matches của V0 |
-| **S5 (RANSAC DLT)** | 1 thread hoặc warp xử lý 1 giả thuyết, seed LCG/ID giả thuyết tất định | Mẫu suy biến và phép thu gọn reduction không tất định; kiểm tra tính hữu hạn finite và tie-break tất định |
+| **S5 (RANSAC DLT/fallback)** | 1 thread hoặc warp xử lý 1 giả thuyết; fallback displacement dùng reduction/histogram robust | Mẫu suy biến, texture lặp và reduction không tất định; kiểm tra hình học, seed/tie-break cố định và đối chiếu model flag với V0 |
 | **S6 (Chiếu & Trộn)** | Lưới 2D canvas, ánh xạ tọa độ ngược, lấy mẫu texture/bilinear | Canvas/alpha không hợp lệ và trôi dạt nội suy; xác thực biên trên host và kiểm tra dung sai pixel |
 
 ### 8.3 Các ý tưởng tối ưu hóa ứng viên (Một ý tưởng cốt lõi cho mỗi phiên bản)

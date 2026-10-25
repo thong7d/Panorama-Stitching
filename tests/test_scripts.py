@@ -41,9 +41,9 @@ def test_manifest_structure():
 
     default_locations = {
         "site1_indoor": "Indoor residential kitchen/utility room (exact GPS not recorded)",
-        "site2_outdoor": "Outdoor open field (exact GPS not recorded)",
-        "site3_custom": "Outdoor building courtyard/residential area (exact GPS not recorded)",
-        "challenging": "Urban rooftop at night (exact GPS not recorded)",
+        "site2_outdoor": "Urban rooftop/terrace overlooking residential buildings (exact GPS not recorded)",
+        "site3_custom": "Outdoor residential rooftop/service corridor (exact GPS not recorded)",
+        "challenging": "Indoor residential kitchen/utility room (exact GPS not recorded)",
     }
     manifest_dirty = False
     for pair in data["pairs"]:
@@ -55,7 +55,7 @@ def test_manifest_structure():
         assert pair.get("capture_location"), f"{pair['id']} missing capture_location"
         assert pair.get("visual_challenges"), f"{pair['id']} missing visual_challenges"
         overlap = pair.get("estimated_overlap_percent")
-        assert isinstance(overlap, (int, float)) and 0 < overlap < 100
+        assert isinstance(overlap, (int, float)) and 30 <= overlap <= 50
     
     if manifest_dirty:
         with open(manifest_path, "w", encoding="utf-8") as f:
@@ -113,6 +113,7 @@ def test_validate_metrics_script():
         "matches": 420,
         "inliers": 290,
         "inlier_ratio": 290 / 420,
+        "transform_model": "homography",
         "homography_a_to_b": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
         "timing_ms": {
             "stage1_preprocess": {"avg": 5.0, "median": 4.9, "min": 4.8},
@@ -182,7 +183,10 @@ def test_preprocessed_images_exist():
 def test_homography_validation_math():
     print("[Python Test 5] Checking homography normalization across resolutions...")
     import numpy as np
-    from scripts.validate_homography import _normalized_homography
+    from scripts.validate_homography import (
+        _homography_geometrically_plausible,
+        _normalized_homography,
+    )
 
     H_normalized = np.array([
         [1.05, -0.02, -0.35],
@@ -196,6 +200,10 @@ def test_homography_validation_math():
         normalized_results.append(_normalized_homography(H_pixels, width, height))
     for result in normalized_results:
         assert np.allclose(result, H_normalized, atol=1e-10)
+    assert _homography_geometrically_plausible(np.eye(3), 1280, 720)
+    assert not _homography_geometrically_plausible(
+        np.diag([4.0, 4.0, 1.0]), 1280, 720
+    )
     print("  -> Pixel-space homographies normalize to one resolution-invariant model (PASS)")
 
 

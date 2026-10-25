@@ -22,7 +22,7 @@ REQUIRED_TOP_KEYS = [
     "schema_version", "timestamp", "version", "parent_version", "optimization",
     "device_name", "image_width", "image_height", "runs", "warmups",
     "status", "warning", "keypoints_a", "keypoints_b", "matches", "inliers",
-    "inlier_ratio", "homography_a_to_b", "timing_ms", "amdahl_model",
+    "inlier_ratio", "transform_model", "homography_a_to_b", "timing_ms", "amdahl_model",
     "amdahl_parallel_fraction", "amdahl_smax"
 ]
 
@@ -101,6 +101,13 @@ def validate_metrics_json(json_path: str) -> bool:
         print(f"[Lỗi] Trạng thái '{data['status']}' không hợp lệ, kỳ vọng SUCCESS, LOW_CONFIDENCE, hoặc FAILURE")
         return False
 
+    if data["transform_model"] not in ["homography", "translation_fallback"]:
+        print(
+            f"[Lỗi] transform_model '{data['transform_model']}' không hợp lệ; "
+            "kỳ vọng homography hoặc translation_fallback"
+        )
+        return False
+
     if data["inliers"] > data["matches"]:
         print("[Lỗi] Số lượng inlier không thể vượt quá số lượng matches")
         return False
@@ -123,4 +130,3 @@ if __name__ == '__main__':
             all_valid = False
 
     sys.exit(0 if all_valid else 1)
-

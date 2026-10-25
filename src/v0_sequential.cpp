@@ -704,12 +704,179 @@ struct LcgRng {
     }
 };
 
+static bool homography_geometry_plausible(const float H[9], int image_w, int image_h) {
+    if (image_w <= 0 || image_h <= 0) return true;
+
+    const float corners[4][2] = {
+        {0.0f, 0.0f},
+        {static_cast<float>(image_w), 0.0f},
+        {static_cast<float>(image_w), static_cast<float>(image_h)},
+        {0.0f, static_cast<float>(image_h)}
+    };
+    float projected[4][2];
+    float min_x = std::numeric_limits<float>::max();
+    float min_y = std::numeric_limits<float>::max();
+    float max_x = -std::numeric_limits<float>::max();
+    float max_y = -std::numeric_limits<float>::max();
+    float min_abs_den = std::numeric_limits<float>::max();
+    float max_abs_den = 0.0f;
+    float first_den = 0.0f;
+
+    for (int i = 0; i < 4; i++) {
+        const float x = corners[i][0];
+        const float y = corners[i][1];
+        const float den = H[6] * x + H[7] * y + H[8];
+        if (!std::isfinite(den) || std::abs(den) < 1e-4f) return false;
+        if (i == 0) first_den = den;
+        if (den * first_den <= 0.0f) return false;  // pole crosses the image
+
+        const float px = (H[0] * x + H[1] * y + H[2]) / den;
+        const float py = (H[3] * x + H[4] * y + H[5]) / den;
+        if (!std::isfinite(px) || !std::isfinite(py)) return false;
+        projected[i][0] = px;
+        projected[i][1] = py;
+        min_x = std::min(min_x, px);
+        min_y = std::min(min_y, py);
+        max_x = std::max(max_x, px);
+        max_y = std::max(max_y, py);
+        min_abs_den = std::min(min_abs_den, std::abs(den));
+        max_abs_den = std::max(max_abs_den, std::abs(den));
+    }
+
+    double twice_area = 0.0;
+    for (int i = 0; i < 4; i++) {
+        const int j = (i + 1) % 4;
+        twice_area += static_cast<double>(projected[i][0]) * projected[j][1]
+                    - static_cast<double>(projected[j][0]) * projected[i][1];
+    }
+    const double area = 0.5 * twice_area;
+    const double source_area = static_cast<double>(image_w) * image_h;
+    const double area_scale = area / source_area;
+    const float span_x = max_x - min_x;
+    const float span_y = max_y - min_y;
+    const float denominator_ratio = max_abs_den / min_abs_den;
+
+    // Panorama điện thoại cùng camera không được lật ảnh, phóng đại toàn cục
+    // cực đoan hoặc đặt một pole projective sát khung. Các giới hạn rộng này
+    // chỉ loại H suy biến do match lặp, không nhằm đánh giá chất lượng thị giác.
+    return area_scale >= 0.35 && area_scale <= 3.0
+        && span_x <= 3.0f * image_w
+        && span_y <= 3.0f * image_h
+        && denominator_ratio <= 6.0f;
+}
+
+static bool estimate_translation_fallback(
+        const std::vector<Match>& matches,
+        const std::vector<Keypoint>& kpA,
+        const std::vector<Keypoint>& kpB,
+        int image_w,
+        int image_h,
+        Homography& H,
+        int& out_inliers) {
+    if (image_w <= 0 || image_h <= 0) return false;
+
+    struct Displacement { float dx, dy; };
+    std::vector<Displacement> candidates;
+    candidates.reserve(matches.size());
+
+    // Dataset quy ước A là góc nhìn trái và B là góc nhìn phải. Với overlap
+    // 30-50%, điểm chung dịch sang trái khoảng 30-85% chiều rộng ở ảnh B.
+    const float min_dx = -0.85f * image_w;
+    const float max_dx = -0.20f * image_w;
+    const float max_abs_dy = 0.35f * image_h;
+    for (const Match& match : matches) {
+        if (match.idx_a < 0 || match.idx_b < 0
+                || match.idx_a >= static_cast<int>(kpA.size())
+                || match.idx_b >= static_cast<int>(kpB.size())) {
+            continue;
+        }
+        const float dx = kpB[match.idx_b].x - kpA[match.idx_a].x;
+        const float dy = kpB[match.idx_b].y - kpA[match.idx_a].y;
+        if (dx >= min_dx && dx <= max_dx && std::abs(dy) <= max_abs_dy) {
+            candidates.push_back({dx, dy});
+        }
+    }
+    // Ở 4K, Top-K vẫn cố định 1000 để benchmark công bằng nên tập match có
+    // thể rất thưa. Nếu cửa sổ 30-85% chưa đủ bốn điểm, mở rộng có kiểm soát
+    // nhưng vẫn bắt buộc chuyển động sang trái và giới hạn drift theo phương dọc.
+    if (candidates.size() < 4) {
+        candidates.clear();
+        for (const Match& match : matches) {
+            if (match.idx_a < 0 || match.idx_b < 0
+                    || match.idx_a >= static_cast<int>(kpA.size())
+                    || match.idx_b >= static_cast<int>(kpB.size())) {
+                continue;
+            }
+            const float dx = kpB[match.idx_b].x - kpA[match.idx_a].x;
+            const float dy = kpB[match.idx_b].y - kpA[match.idx_a].y;
+            if (dx >= -0.95f * image_w && dx <= -0.05f * image_w
+                    && std::abs(dy) <= 0.60f * image_h) {
+                candidates.push_back({dx, dy});
+            }
+        }
+    }
+    if (candidates.size() < 4) return false;
+
+    const float consensus_threshold =
+        std::max(12.0f, 0.03f * std::sqrt(static_cast<float>(image_w * image_h)));
+    int best_count = 0;
+    size_t best_index = 0;
+    for (size_t i = 0; i < candidates.size(); i++) {
+        int count = 0;
+        for (const Displacement& d : candidates) {
+            const float ex = d.dx - candidates[i].dx;
+            const float ey = d.dy - candidates[i].dy;
+            if (ex * ex + ey * ey <= consensus_threshold * consensus_threshold) count++;
+        }
+        if (count > best_count) {
+            best_count = count;
+            best_index = i;
+        }
+    }
+    if (best_count < 4) return false;
+
+    std::vector<float> dx_values;
+    std::vector<float> dy_values;
+    dx_values.reserve(best_count);
+    dy_values.reserve(best_count);
+    for (const Displacement& d : candidates) {
+        const float ex = d.dx - candidates[best_index].dx;
+        const float ey = d.dy - candidates[best_index].dy;
+        if (ex * ex + ey * ey <= consensus_threshold * consensus_threshold) {
+            dx_values.push_back(d.dx);
+            dy_values.push_back(d.dy);
+        }
+    }
+    const size_t middle = dx_values.size() / 2;
+    std::nth_element(dx_values.begin(), dx_values.begin() + middle, dx_values.end());
+    std::nth_element(dy_values.begin(), dy_values.begin() + middle, dy_values.end());
+    const float median_dx = dx_values[middle];
+    const float median_dy = dy_values[middle];
+
+    out_inliers = 0;
+    const float final_threshold = 1.5f * consensus_threshold;
+    for (const Displacement& d : candidates) {
+        const float ex = d.dx - median_dx;
+        const float ey = d.dy - median_dy;
+        if (ex * ex + ey * ey <= final_threshold * final_threshold) out_inliers++;
+    }
+
+    H = Homography();
+    H.h[2] = median_dx;
+    H.h[5] = median_dy;
+    H.is_valid = true;
+    H.used_translation_fallback = true;
+    return out_inliers >= 4;
+}
+
 bool stage5_ransac_homography_cpu(const std::vector<Match>& matches, 
                                   const std::vector<Keypoint>& kpA, 
                                   const std::vector<Keypoint>& kpB, 
                                   Homography& best_H, 
                                   int& out_inliers, 
-                                  float& elapsed_ms) {
+                                  float& elapsed_ms,
+                                  int image_w,
+                                  int image_h) {
     CpuTimer timer;
     timer.Start();
 
@@ -834,8 +1001,26 @@ bool stage5_ransac_homography_cpu(const std::vector<Match>& matches,
         }
     }
 
+    const int confidence_floor = std::max(12, static_cast<int>(0.15f * n_matches));
+    const bool projective_model_ok =
+        max_inliers >= confidence_floor
+        && homography_geometry_plausible(opt_H, image_w, image_h);
+
+    if (!projective_model_ok) {
+        int translation_inliers = 0;
+        Homography translation_H;
+        if (estimate_translation_fallback(
+                matches, kpA, kpB, image_w, image_h,
+                translation_H, translation_inliers)) {
+            best_H = translation_H;
+            out_inliers = translation_inliers;
+            elapsed_ms = timer.Stop();
+            return true;
+        }
+    }
+
     out_inliers = max_inliers;
-    if (max_inliers >= 4) {
+    if (max_inliers >= 4 && (image_w <= 0 || image_h <= 0 || projective_model_ok)) {
         std::memcpy(best_H.h, opt_H, 9 * sizeof(float));
         best_H.is_valid = true;
     }
@@ -1072,6 +1257,9 @@ bool PipelineResult::export_metrics_json(const std::string& json_path) const {
     ofs << "  \"matches\": " << diagnostics.matches << ",\n";
     ofs << "  \"inliers\": " << diagnostics.inliers << ",\n";
     ofs << "  \"inlier_ratio\": " << std::fixed << std::setprecision(4) << diagnostics.inlier_ratio << ",\n";
+    ofs << "  \"transform_model\": \""
+        << (diagnostics.H.used_translation_fallback ? "translation_fallback" : "homography")
+        << "\",\n";
 
     ofs << "  \"homography_a_to_b\": [";
     for (int i = 0; i < 9; i++) {
@@ -1137,7 +1325,8 @@ PipelineResult run_v0_pipeline(const Image& imgA,
         auto matches = stage4_matching_cpu(descA, descB, t4);
         Homography H;
         int inliers = 0;
-        bool ok_ransac = stage5_ransac_homography_cpu(matches, kpA, kpB, H, inliers, t5);
+        bool ok_ransac = stage5_ransac_homography_cpu(
+            matches, kpA, kpB, H, inliers, t5, imgA.w, imgA.h);
         if (ok_ransac) {
             bool ok_warp = false;
             Image pano = stage6_warp_blend_cpu(imgA, imgB, H, ok_warp, t6);
@@ -1168,7 +1357,8 @@ PipelineResult run_v0_pipeline(const Image& imgA,
 
         Homography H;
         int inliers = 0;
-        bool ok_ransac = stage5_ransac_homography_cpu(matches, kpA, kpB, H, inliers, t5);
+        bool ok_ransac = stage5_ransac_homography_cpu(
+            matches, kpA, kpB, H, inliers, t5, imgA.w, imgA.h);
         t_s5[r] = t5;
 
         // Lưu thông số diagnostics ở lần chạy đầu tiên
@@ -1185,7 +1375,13 @@ PipelineResult run_v0_pipeline(const Image& imgA,
                 result.diagnostics.warning = "RANSAC failed: less than 4 inliers or singular system";
             } else if (inliers < std::max(12, static_cast<int>(0.15f * matches.size()))) {
                 result.diagnostics.status = PipelineStatus::LOW_CONFIDENCE;
-                result.diagnostics.warning = "Low inlier ratio or count; output may have alignment defects";
+                result.diagnostics.warning = H.used_translation_fallback
+                    ? "Unstable homography rejected; translation fallback has low consensus"
+                    : "Low inlier ratio or count; output may have alignment defects";
+            } else if (H.used_translation_fallback) {
+                result.diagnostics.status = PipelineStatus::SUCCESS;
+                result.diagnostics.warning =
+                    "Unstable homography rejected; robust translation fallback used";
             } else {
                 result.diagnostics.status = PipelineStatus::SUCCESS;
                 result.diagnostics.warning = "None";

@@ -262,6 +262,44 @@ void test_ransac_refit_accuracy() {
     std::cout << "  -> Inliers: " << inliers << " | grid RMSE: " << rmse << " px (PASS)\n";
 }
 
+void test_degenerate_homography_translation_fallback() {
+    std::cout << "[Test 7] Testing geometric rejection and translation fallback...\n";
+    std::vector<Keypoint> points_a, points_b;
+    std::vector<Match> matches;
+
+    // Dominant but implausible projective consensus: uniform 3x expansion.
+    for (int i = 0; i < 30; i++) {
+        const float x = 400.0f + static_cast<float>((i % 6) * 50);
+        const float y = 180.0f + static_cast<float>((i / 6) * 45);
+        points_a.push_back({x, y, 0.0f, 1.0f});
+        points_b.push_back({3.0f * x - 1200.0f, 3.0f * y - 400.0f, 0.0f, 1.0f});
+        matches.push_back({i, i, 0});
+    }
+
+    // Physically plausible horizontal panorama consensus.
+    for (int i = 0; i < 12; i++) {
+        const float x = 760.0f + static_cast<float>((i % 4) * 70);
+        const float y = 160.0f + static_cast<float>((i / 4) * 120);
+        const int index = static_cast<int>(points_a.size());
+        points_a.push_back({x, y, 0.0f, 1.0f});
+        points_b.push_back({x - 700.0f, y + 20.0f, 0.0f, 1.0f});
+        matches.push_back({index, index, 0});
+    }
+
+    Homography estimated;
+    int inliers = 0;
+    float elapsed = 0.0f;
+    const bool ok = stage5_ransac_homography_cpu(
+        matches, points_a, points_b, estimated, inliers, elapsed, 1280, 720);
+    assert(ok && estimated.is_valid);
+    assert(estimated.used_translation_fallback);
+    assert(inliers >= 12);
+    assert(std::abs(estimated.h[2] + 700.0f) < 1.0f);
+    assert(std::abs(estimated.h[5] - 20.0f) < 1.0f);
+    std::cout << "  -> Rejected 3x projective model; fallback inliers: "
+              << inliers << " (PASS)\n";
+}
+
 int main() {
     std::cout << "=========================================================\n";
     std::cout << "Running Phase A CPU Unit Tests (Plan v4 Quality Gate A)\n";
@@ -273,6 +311,7 @@ int main() {
     test_homography_properties();
     test_fast9_two_cardinal_shortcut();
     test_ransac_refit_accuracy();
+    test_degenerate_homography_translation_fallback();
 
     std::cout << "=========================================================\n";
     std::cout << "[ALL UNIT TESTS PASSED SUCCESSFULLY]\n";

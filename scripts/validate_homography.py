@@ -66,6 +66,41 @@ def _normalized_homography(H: np.ndarray, width: int, height: int) -> np.ndarray
     return normalized / normalized[2, 2]
 
 
+def _homography_geometrically_plausible(
+    H: np.ndarray, width: int, height: int
+) -> bool:
+    corners = np.array(
+        [[0.0, 0.0], [width, 0.0], [width, height], [0.0, height]],
+        dtype=np.float64,
+    )
+    mapped = _project(H, corners)
+    if not np.isfinite(mapped).all():
+        return False
+    homogeneous_denominators = (
+        H[2, 0] * corners[:, 0] + H[2, 1] * corners[:, 1] + H[2, 2]
+    )
+    if np.any(np.abs(homogeneous_denominators) < 1e-4):
+        return False
+    if np.any(homogeneous_denominators * homogeneous_denominators[0] <= 0):
+        return False
+
+    x, y = mapped[:, 0], mapped[:, 1]
+    signed_area = 0.5 * np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y)
+    area_scale = signed_area / float(width * height)
+    span_x = float(x.max() - x.min())
+    span_y = float(y.max() - y.min())
+    denominator_ratio = float(
+        np.max(np.abs(homogeneous_denominators))
+        / np.min(np.abs(homogeneous_denominators))
+    )
+    return (
+        0.35 <= area_scale <= 3.0
+        and span_x <= 3.0 * width
+        and span_y <= 3.0 * height
+        and denominator_ratio <= 6.0
+    )
+
+
 def _reference_homography(
     left: np.ndarray, right: np.ndarray
 ) -> tuple[np.ndarray | None, int, int, str]:
@@ -128,19 +163,25 @@ def validate(
                 continue
             height, width = left.shape
             H_ref, matches, inliers, method = _reference_homography(left, right)
+            reference_plausible = bool(
+                H_ref is not None
+                and _homography_geometrically_plausible(H_ref, width, height)
+            )
             disagreement = (
                 _grid_disagreement_pct(H_v0, H_ref, width, height)
-                if H_ref is not None
+                if reference_plausible
                 else math.inf
             )
             record = {
                 "site": output_name,
                 "resolution": resolution,
+                "v0_transform_model": metrics.get("transform_model", "homography"),
                 "reference_method": f"OpenCV {method} + findHomography",
                 "reference_matches": matches,
                 "reference_inliers": inliers,
                 "v0_reference_grid_disagreement_pct_diagonal": disagreement,
                 "reference_available": H_ref is not None,
+                "reference_geometrically_plausible": reference_plausible,
             }
             records.append(record)
             normalized_by_site.setdefault(output_name, []).append(
@@ -183,12 +224,13 @@ def main() -> int:
         print("[Error] No matching real-image metrics were found.")
         return 1
 
-    print("site\tresolution\tref matches/inliers\tV0-vs-ref grid disagreement (% diagonal)")
+    print("site\tresolution\tV0 model\tref plausible\tref matches/inliers\tV0-vs-ref grid disagreement (% diagonal)")
     for row in records:
         disagreement = row["v0_reference_grid_disagreement_pct_diagonal"]
         value = f"{disagreement:.3f}" if math.isfinite(disagreement) else "N/A"
         print(
-            f"{row['site']}\t{row['resolution']}\t"
+            f"{row['site']}\t{row['resolution']}\t{row['v0_transform_model']}\t"
+            f"{row['reference_geometrically_plausible']}\t"
             f"{row['reference_matches']}/{row['reference_inliers']}\t{value}"
         )
     print("\nCross-resolution V0 consistency (normalized coordinates):")

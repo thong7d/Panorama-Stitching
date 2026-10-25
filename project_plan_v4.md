@@ -85,8 +85,8 @@ Các blocker Phase A/B đã được đóng và có regression test:
 - Mặc định 1 warm-up + 5 timed runs; report Avg/Median/Min.
 - Amdahl dùng S1+S2+S6 đo bằng median trên end-to-end nên luôn hữu hạn.
 - Ba standard sites và challenging pair đều có timing đủ ba độ phân giải.
-- Homography ảnh thật được đối chiếu độc lập với OpenCV và kiểm tra nhất quán
-  trong hệ tọa độ chuẩn hóa.
+- Mô hình biến đổi ảnh thật được đối chiếu độc lập với OpenCV và kiểm tra nhất
+  quán trong hệ tọa độ chuẩn hóa; metrics ghi rõ homography hay translation fallback.
 
 Blocker duy nhất ngoài nhóm ở thời điểm khóa Midterm là dataset `provided/`.
 
@@ -97,10 +97,10 @@ Blocker duy nhất ngoài nhóm ở thời điểm khóa Midterm là dataset `pr
 | Stage | Phương pháp | Tham số/contract cố định |
 |---|---|---|
 | 1. Preprocess | RGB→grayscale, Gaussian blur 5×5 | `Y=0.299R+0.587G+0.114B`, σ=1.0, boundary clamp |
-| 2. Detect | FAST-9, NMS 3×3, Top-K | threshold=20, K=1000 tối đa, sort response giảm dần rồi linear index tăng dần |
+| 2. Detect | FAST-9, NMS 3×3, Top-K | threshold=20, K=2000 tối đa, sort response giảm dần rồi linear index tăng dần |
 | 3. Describe | Oriented BRIEF/ORB 256-bit | intensity centroid, pattern 256 cặp đã kiểm chứng, loại keypoint không đủ border |
 | 4. Match | Brute-force Hamming + Lowe ratio | `best1 < 0.75 × best2`, một chiều A→B |
-| 5. Homography | RANSAC + normalized 4-point DLT | 2000 hypotheses, reprojection threshold=3 px, seed=42, partial pivoting |
+| 5. Transform | RANSAC + normalized 4-point DLT; translation fallback khi H suy biến | 2000 hypotheses, reprojection threshold=3 px, seed=42, partial pivoting; fallback dùng displacement consensus + median |
 | 6. Warp | B được warp vào frame A | inverse mapping, bilinear sampling, symmetric feathering |
 
 ### 3.1 Quy ước hình học
@@ -109,10 +109,14 @@ Blocker duy nhất ngoài nhóm ở thời điểm khóa Midterm là dataset `pr
 - Canvas nằm trong frame A; để tìm biên panorama, các góc B được ánh xạ về A bằng `inverse(H_A_to_B)`.
 - Khi render một pixel canvas/A, dùng `H_A_to_B` để lấy mẫu từ B.
 - Homography metrics dùng projected-grid error, không so trực tiếp chín hệ số chưa chuẩn hóa.
+- H projective phải qua kiểm tra pole, hướng, diện tích và span. Nếu không đạt,
+  Stage 5 dùng mô hình tịnh tiến robust cho panorama quay ngang và ghi
+  transform_model=translation_fallback.
 
 ### 3.2 Quy ước quality
 
-- Hard failure nếu có dưới 4 matches/inliers, H không hữu hạn, H không khả nghịch hoặc canvas không hợp lệ.
+- Hard failure nếu cả RANSAC Homography lẫn translation fallback có dưới 4
+  inliers, ma trận không hữu hạn/không khả nghịch hoặc canvas không hợp lệ.
 - `low_confidence` nếu inliers `< max(12, 15% số matches)`; có thể xuất ảnh để phân tích nhưng report phải đánh dấu.
 - Không gọi Stage 6 nếu Stage 5 hard-fail.
 - Canvas không được “clamp cho chạy tiếp”. Giới hạn an toàn: tối đa 4× mỗi chiều và 16× số pixel lớn nhất của input; vượt giới hạn phải trả lỗi rõ ràng.
@@ -137,7 +141,7 @@ Blocker duy nhất ngoài nhóm ở thời điểm khóa Midterm là dataset `pr
 
 - `Image` và `GrayImage`: RAII move-only, cấm shallow copy, destructor/free idempotent.
 - `Descriptor`: `alignas(16)` và chứa `uint32_t words[8]`; CPU dùng popcount tương đương, CUDA dùng `__popc`.
-- `Homography`: lưu `H_A_to_B[9]`, có hàm normalize/finite/invertibility validation.
+- `Homography`: lưu `H_A_to_B[9]`, model flag fallback và có hàm normalize/finite validation.
 - `PipelineDiagnostics`: keypoint A/B, matches, inliers, inlier ratio, H, status và warning.
 - `TimingSummary`: Avg/Median/Min cho sáu stage, kernel total, H2D, control copy, D2H, end-to-end và one-time setup.
 - `PipelineResult`: panorama + diagnostics + timings.
@@ -150,7 +154,7 @@ Mỗi benchmark tạo một JSON gồm:
 ```text
 schema_version, timestamp, version, parent_version, optimization,
 device_name, image_width, image_height, runs, warmups,
-status, warning, keypoints_a, keypoints_b, matches, inliers,
+status, warning, keypoints_a, keypoints_b, matches, inliers, transform_model,
 homography_a_to_b[9],
 timing_ms.{stage1..stage6,kernel_total,h2d,control,d2h,end_to_end,setup}.{avg,min}
 ```

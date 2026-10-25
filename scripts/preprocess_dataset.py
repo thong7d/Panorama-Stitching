@@ -51,7 +51,44 @@ def crop_center_16_9(img: Image.Image) -> Image.Image:
         offset = (h - new_h) // 2
         return img.crop((0, offset, w, offset + new_h))
 
-def process_file(raw_path: str, out_dir: str, prefix: str) -> bool:
+def crop_overlap_side(
+    img: Image.Image,
+    trim_left_fraction: float = 0.0,
+    trim_right_fraction: float = 0.0,
+) -> Image.Image:
+    """Cắt một phần mép ngang rồi giữ lại khung 16:9.
+
+    Cấu hình này dùng để hiệu chỉnh nhẹ tỷ lệ overlap của một cặp ảnh mà
+    không sửa ảnh gốc. Hai tỷ lệ được tính trên ảnh 16:9 sau khi cắt tâm.
+    """
+    if not (0.0 <= trim_left_fraction < 0.25):
+        raise ValueError("trim_left_fraction phải nằm trong [0, 0.25)")
+    if not (0.0 <= trim_right_fraction < 0.25):
+        raise ValueError("trim_right_fraction phải nằm trong [0, 0.25)")
+
+    base = crop_center_16_9(img)
+    if trim_left_fraction == 0.0 and trim_right_fraction == 0.0:
+        return base
+
+    w, h = base.size
+    left_px = int(round(w * trim_left_fraction))
+    right_px = int(round(w * trim_right_fraction))
+    new_w = w - left_px - right_px
+    new_h = int(round(new_w * 9.0 / 16.0))
+    if new_w <= 0 or new_h <= 0 or new_h > h:
+        raise ValueError("Cấu hình crop overlap tạo ra khung ảnh không hợp lệ")
+
+    top = (h - new_h) // 2
+    return base.crop((left_px, top, left_px + new_w, top + new_h))
+
+
+def process_file(
+    raw_path: str,
+    out_dir: str,
+    prefix: str,
+    trim_left_fraction: float = 0.0,
+    trim_right_fraction: float = 0.0,
+) -> bool:
     """Xử lý ảnh gốc: xoay EXIF, cắt tâm 16:9, và xuất 3 độ phân giải chuẩn."""
     if not os.path.isfile(raw_path):
         print(f"[Lỗi] Không tìm thấy file gốc: {raw_path}")
@@ -65,8 +102,12 @@ def process_file(raw_path: str, out_dir: str, prefix: str) -> bool:
             if img.mode != 'RGB':
                 img = img.convert('RGB')
 
-            # 3. Cắt trọng tâm 16:9
-            cropped = crop_center_16_9(img)
+            # 3. Cắt trọng tâm 16:9 và áp dụng crop overlap nếu manifest yêu cầu
+            cropped = crop_overlap_side(
+                img,
+                trim_left_fraction=trim_left_fraction,
+                trim_right_fraction=trim_right_fraction,
+            )
 
             # 4. Xuất 3 độ phân giải chuẩn
             for res_name, (tw, th) in RESOLUTIONS.items():
@@ -101,9 +142,9 @@ def main():
     # Tự động khắc phục capture_location nếu tệp manifest tải từ Drive bị thiếu
     default_locations = {
         "site1_indoor": "Indoor residential kitchen/utility room (exact GPS not recorded)",
-        "site2_outdoor": "Outdoor open field (exact GPS not recorded)",
-        "site3_custom": "Outdoor building courtyard/residential area (exact GPS not recorded)",
-        "challenging": "Urban rooftop at night (exact GPS not recorded)",
+        "site2_outdoor": "Urban rooftop/terrace overlooking residential buildings (exact GPS not recorded)",
+        "site3_custom": "Outdoor residential rooftop/service corridor (exact GPS not recorded)",
+        "challenging": "Indoor residential kitchen/utility room (exact GPS not recorded)",
     }
     manifest_dirty = False
     for pair in manifest.get("pairs", []):
@@ -142,8 +183,26 @@ def main():
         left_raw_path = os.path.join(pair_dir, left_raw_name)
         right_raw_path = os.path.join(pair_dir, right_raw_name)
 
-        ok_left = process_file(left_raw_path, pair_dir, "left")
-        ok_right = process_file(right_raw_path, pair_dir, "right")
+        overlap_crop_fraction = float(pair.get("overlap_crop_fraction", 0.0))
+        if overlap_crop_fraction:
+            print(
+                "  [INFO] Crop overlap: bỏ "
+                f"{overlap_crop_fraction * 100:.1f}% mép phải ảnh trái và "
+                f"{overlap_crop_fraction * 100:.1f}% mép trái ảnh phải."
+            )
+
+        ok_left = process_file(
+            left_raw_path,
+            pair_dir,
+            "left",
+            trim_right_fraction=overlap_crop_fraction,
+        )
+        ok_right = process_file(
+            right_raw_path,
+            pair_dir,
+            "right",
+            trim_left_fraction=overlap_crop_fraction,
+        )
 
         if ok_left and ok_right:
             processed_count += 1
@@ -159,4 +218,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

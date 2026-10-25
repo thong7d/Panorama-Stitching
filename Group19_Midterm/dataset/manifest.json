@@ -1,0 +1,65 @@
+{
+  "project": "CSC14120 - Panorama Image Stitching",
+  "aspect_ratio": "16:9",
+  "resolutions": {
+    "small": [1280, 720],
+    "medium": [1920, 1080],
+    "large": [3840, 2160]
+  },
+  "drive_url": "https://drive.google.com/drive/folders/1vnD51fqHjY-HGqp365dTa1SX_0femIwG?usp=drive_link",
+  "capture_location_note": "Exact GPS coordinates were not recorded; locations are documented by the visible scene context in the original captures.",
+  "pairs": [
+    {
+      "id": "site1_indoor",
+      "kind": "standard",
+      "directory": "dataset/site1_indoor",
+      "left_raw": "in1.jpg",
+      "right_raw": "in2.jpg",
+      "description": "Group-captured indoor kitchen/utility-room panorama spanning a storage cabinet, doorway, work table and refrigerator",
+      "capture_location": "Indoor residential kitchen/utility room (exact GPS not recorded)",
+      "estimated_overlap_percent": 38,
+      "visual_challenges": ["near-field parallax", "depth discontinuities", "indoor exposure variation", "repetitive wall tiles"]
+    },
+    {
+      "id": "site2_outdoor",
+      "kind": "standard",
+      "directory": "dataset/site2_outdoor",
+      "left_raw": "out1.jpg",
+      "right_raw": "out2.jpg",
+      "description": "Group-captured urban rooftop panorama with tiled temple roofs, distant residential towers and a bright cloudy sky",
+      "capture_location": "Urban rooftop/terrace overlooking residential buildings (exact GPS not recorded)",
+      "estimated_overlap_percent": 33,
+      "visual_challenges": ["large low-texture sky", "repetitive roof tiles", "distant features", "exposure variation"]
+    },
+    {
+      "id": "site3_custom",
+      "kind": "standard",
+      "directory": "dataset/site3_custom",
+      "left_raw": "cus1.jpg",
+      "right_raw": "cus2.jpg",
+      "description": "Group-captured rooftop corridor panorama with building facades, utility boxes and a repetitive green safety mesh",
+      "capture_location": "Outdoor residential rooftop/service corridor (exact GPS not recorded)",
+      "estimated_overlap_percent": 49,
+      "overlap_crop_fraction": 0.02,
+      "visual_challenges": ["repetitive mesh texture", "strong perspective", "depth variation", "bright sky"]
+    },
+    {
+      "id": "challenging",
+      "kind": "challenging",
+      "directory": "dataset/challenging",
+      "left_raw": "cha1.jpg",
+      "right_raw": "cha2.jpg",
+      "description": "Group-captured close-range indoor panorama spanning a utility table, refrigerator, cooking area and laptop desk",
+      "capture_location": "Indoor residential kitchen/utility room (exact GPS not recorded)",
+      "estimated_overlap_percent": 39,
+      "visual_challenges": ["near-field parallax", "depth discontinuities", "partial occlusion", "indoor exposure variation"]
+    },
+    {
+      "id": "provided",
+      "kind": "provided",
+      "directory": "dataset/provided",
+      "status": "external_blocker",
+      "description": "Instructor-provided benchmark dataset from course LMS. Marked as external blocker for Final Gallery."
+    }
+  ]
+}

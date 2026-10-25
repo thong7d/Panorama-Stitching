@@ -29,13 +29,15 @@ std::vector<Match> stage4_matching_cpu(const std::vector<Descriptor>& descA,
                                        const std::vector<Descriptor>& descB, 
                                        float& elapsed_ms);
 
-// Giai đoạn 5: Ước lượng Homography (RANSAC 2000 + Normalized 4-point DLT + Khử Gauss)
+// Giai đoạn 5: RANSAC Homography; fallback tịnh tiến robust nếu H suy biến hình học
 bool stage5_ransac_homography_cpu(const std::vector<Match>& matches, 
                                   const std::vector<Keypoint>& kpA, 
                                   const std::vector<Keypoint>& kpB, 
                                   Homography& best_H, 
                                   int& out_inliers, 
-                                  float& elapsed_ms);
+                                  float& elapsed_ms,
+                                  int image_w = 0,
+                                  int image_h = 0);
 
 // Giai đoạn 6: Chiếu hình & Trộn ảnh (Inverse Warping + Nội suy Bilinear + Trộn mềm Symmetric Feathering)
 Image stage6_warp_blend_cpu(const Image& imgA, 
@@ -48,4 +50,3 @@ Image stage6_warp_blend_cpu(const Image& imgA,
 PipelineResult run_v0_pipeline(const Image& imgA, 
                                const Image& imgB, 
                                int runs = DEFAULT_RUNS);
-

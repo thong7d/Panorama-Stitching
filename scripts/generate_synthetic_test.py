@@ -7,8 +7,9 @@ Authors: Pham Minh Thong (23120364), Nguyen Le Tan Tien (23120369),
          Dao Quoc Tuan (23120392)
 External sources: Pillow and NumPy API documentation; no copied code.
 Description:
-  - Generates a corner-rich synthetic scene at 3 resolutions (720p, 1080p, 4K)
-  - Uses a rigorous projective transform (Homography H_A_to_B)
+  - Uses dataset/synthetic/syn.jpg as a real-photo source texture
+  - Crops two 16:9 views with 40% base overlap at 3 resolutions
+  - Warps the second crop with a known projective Homography H_A_to_B
   - Exports left_<size>.jpg, right_<size>.jpg to dataset/synthetic/
   - Exports dataset/synthetic/ground_truth.json containing:
       - H_A_to_B (3x3 row-major)
@@ -23,13 +24,16 @@ import os
 import math
 import json
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
 
 RESOLUTIONS = {
     'small':  (1280, 720),
     'medium': (1920, 1080),
     'large':  (3840, 2160)
 }
+
+SOURCE_FILENAME = "syn.jpg"
+BASE_OVERLAP_FRACTION = 0.40
 
 def create_rich_canvas(w: int, h: int) -> Image.Image:
     """Tạo canvas nền giàu góc cạnh (corners) và kết cấu đa dạng cho FAST detector"""
@@ -88,86 +92,98 @@ def create_rich_canvas(w: int, h: int) -> Image.Image:
 
 def get_ground_truth_homography(w: int, h: int):
     """
-    Tạo ma trận Homography ground-truth chuẩn H_A_to_B:
-    Bao gồm tịnh tiến ngang ~35% chiều rộng (overlap ~45%),
-    xoay nhẹ ~1.2 độ, và biến dạng phối cảnh nhẹ (projective tilt).
+    Tạo homography tổng hợp A -> B sau hai thao tác:
+    (1) hai crop từ cùng ảnh nguồn lệch nhau 60% chiều rộng (overlap 40%);
+    (2) crop B được warp nhẹ bằng xoay + projective tilt đã chọn.
     """
     theta = math.radians(1.2)
     cos_t = math.cos(theta)
     sin_t = math.sin(theta)
 
-    # Tịnh tiến: t_x tương ứng ~35% w
-    tx = 0.35 * w
-    ty = 0.015 * h
+    crop_offset = (1.0 - BASE_OVERLAP_FRACTION) * w
+    H_crop = np.array([
+        [1.0, 0.0, -crop_offset],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ], dtype=np.float64)
 
-    # Thành phần phối cảnh (perspective / projective terms)
+    # Warp nhẹ quanh tâm crop B, giữ nguyên logic homography đã chọn.
+    cx, cy = 0.5 * w, 0.5 * h
+    translate_to_origin = np.array([
+        [1.0, 0.0, -cx],
+        [0.0, 1.0, -cy],
+        [0.0, 0.0, 1.0],
+    ], dtype=np.float64)
+    rotate = np.array([
+        [cos_t, -sin_t, 0.0],
+        [sin_t,  cos_t, 0.0],
+        [0.0, 0.0, 1.0],
+    ], dtype=np.float64)
+    translate_back = np.array([
+        [1.0, 0.0, cx],
+        [0.0, 1.0, cy + 0.015 * h],
+        [0.0, 0.0, 1.0],
+    ], dtype=np.float64)
+
     p_x = 0.00002 * (1280.0 / w)
     p_y = 0.00001 * (720.0 / h)
-
-    H_A_to_B = np.array([
-        [cos_t, -sin_t, tx],
-        [sin_t,  cos_t, ty],
-        [p_x,    p_y,   1.0]
+    perspective = np.array([
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [p_x, p_y, 1.0],
     ], dtype=np.float64)
+
+    H_post_warp = translate_back @ rotate @ translate_to_origin @ perspective
+    H_post_warp /= H_post_warp[2, 2]
+    H_A_to_B = H_post_warp @ H_crop
 
     # Chuẩn hóa sao cho H[2, 2] = 1.0
     H_A_to_B /= H_A_to_B[2, 2]
     inv_H = np.linalg.inv(H_A_to_B)
     inv_H /= inv_H[2, 2]
 
-    return H_A_to_B, inv_H
+    return H_A_to_B, inv_H, H_post_warp, int(round(crop_offset))
 
 def generate_synthetic_pair_for_res(res_name: str, w: int, h: int, out_dir: str):
     """Sinh cặp ảnh và metadata cho 1 độ phân giải"""
     # 1. Tạo ma trận ground-truth
-    H_A_to_B, inv_H = get_ground_truth_homography(w, h)
+    H_A_to_B, inv_H, H_post_warp, crop_offset = get_ground_truth_homography(w, h)
 
-    # 2. Tạo canvas tổng thể đủ rộng chứa cả Image A và không gian chiếu của Image B
-    # Kích thước canvas lớn hơn ảnh chuẩn:
-    canvas_w = int(w * 1.8)
-    canvas_h = int(h * 1.3)
-    canvas = create_rich_canvas(canvas_w, canvas_h)
-    canvas_arr = np.array(canvas, dtype=np.uint8)
+    # 2. Tạo một canvas ảnh thật đủ rộng cho hai crop 16:9 overlap 40%.
+    source_path = os.path.join(out_dir, SOURCE_FILENAME)
+    if not os.path.isfile(source_path):
+        raise FileNotFoundError(
+            f"Thiếu ảnh nguồn synthetic thật: {source_path}"
+        )
+    scene_w = crop_offset + w
+    with Image.open(source_path) as source:
+        source = ImageOps.exif_transpose(source).convert("RGB")
+        scene = ImageOps.fit(
+            source,
+            (scene_w, h),
+            method=Image.Resampling.LANCZOS,
+            centering=(0.5, 0.5),
+        )
 
-    # 3. Trích xuất Image A: vùng [0..w, 0..h] trên canvas
-    img_A = canvas.crop((0, 0, w, h))
+    # 3. Cắt hai view từ cùng scene. Trước warp, overlap hình học là 40%.
+    img_A = scene.crop((0, 0, w, h))
+    img_B_base = scene.crop((crop_offset, 0, crop_offset + w, h))
 
-    # 4. Trích xuất Image B: áp dụng phép chiếu ngược
-    # Đối với mỗi pixel (u, v) trong Image B, tìm tọa độ tương ứng (x, y) trên canvas:
-    # Điểm trong B liên hệ với điểm trong A qua: [u, v, 1]^T ~ H_A_to_B * [x, y, 1]^T
-    # Do đó [x, y, 1]^T ~ inv_H * [u, v, 1]^T
-    u_coords, v_coords = np.meshgrid(np.arange(w), np.arange(h))
-    ones = np.ones_like(u_coords)
-
-    # Tọa độ trong B
-    pts_B = np.stack([u_coords, v_coords, ones], axis=-1).reshape(-1, 3).T # (3, w*h)
-
-    # Chiếu về canvas A
-    pts_A_proj = inv_H @ pts_B
-    x_canvas = pts_A_proj[0] / pts_A_proj[2]
-    y_canvas = pts_A_proj[1] / pts_A_proj[2]
-
-    x_canvas = x_canvas.reshape(h, w)
-    y_canvas = y_canvas.reshape(h, w)
-
-    # Nội suy bilinear
-    x0 = np.clip(np.floor(x_canvas).astype(int), 0, canvas_w - 2)
-    y0 = np.clip(np.floor(y_canvas).astype(int), 0, canvas_h - 2)
-    x1 = x0 + 1
-    y1 = y0 + 1
-
-    wx = (x_canvas - x0)[..., None]
-    wy = (y_canvas - y0)[..., None]
-
-    ia = canvas_arr[y0, x0].astype(np.float32)
-    ib = canvas_arr[y0, x1].astype(np.float32)
-    ic = canvas_arr[y1, x0].astype(np.float32)
-    id_val = canvas_arr[y1, x1].astype(np.float32)
-
-    top = ia * (1.0 - wx) + ib * wx
-    bottom = ic * (1.0 - wx) + id_val * wx
-    sampled_B = top * (1.0 - wy) + bottom * wy
-    img_B = Image.fromarray(np.clip(sampled_B, 0, 255).astype(np.uint8))
+    # 4. Warp riêng crop B. Pillow cần ánh xạ nghịch từ output về input.
+    inv_post_warp = np.linalg.inv(H_post_warp)
+    inv_post_warp /= inv_post_warp[2, 2]
+    coeffs = (
+        inv_post_warp[0, 0], inv_post_warp[0, 1], inv_post_warp[0, 2],
+        inv_post_warp[1, 0], inv_post_warp[1, 1], inv_post_warp[1, 2],
+        inv_post_warp[2, 0], inv_post_warp[2, 1],
+    )
+    img_B = img_B_base.transform(
+        (w, h),
+        Image.Transform.PERSPECTIVE,
+        coeffs,
+        resample=Image.Resampling.BICUBIC,
+        fillcolor=(0, 0, 0),
+    )
 
     # 5. Lưu ảnh Left (A) và Right (B)
     left_path = os.path.join(out_dir, f"left_{res_name}.jpg")
@@ -179,11 +195,11 @@ def generate_synthetic_pair_for_res(res_name: str, w: int, h: int, out_dir: str)
     print(f"     Phải (Right): {right_path} ({w}x{h})")
 
     # 6. Tạo validation grid points trên vùng overlap
-    # Vùng overlap x thuộc [0.2*w, 0.9*w], y thuộc [0.1*h, 0.9*h]
+    # Chỉ lấy grid nằm trong vùng crop overlap và vẫn hợp lệ sau warp.
     grid_pts_A = []
     grid_pts_B = []
     for gy in np.linspace(0.15 * h, 0.85 * h, 10):
-        for gx in np.linspace(0.25 * w, 0.85 * w, 10):
+        for gx in np.linspace(crop_offset + 0.03 * w, 0.97 * w, 10):
             pA = np.array([gx, gy, 1.0])
             pB = H_A_to_B @ pA
             bx = pB[0] / pB[2]
@@ -201,6 +217,9 @@ def generate_synthetic_pair_for_res(res_name: str, w: int, h: int, out_dir: str)
         "diagonal": diagonal,
         "H_A_to_B": H_A_to_B.flatten().tolist(),
         "inv_H": inv_H.flatten().tolist(),
+        "source_image": SOURCE_FILENAME,
+        "base_overlap_fraction": BASE_OVERLAP_FRACTION,
+        "crop_offset_px": crop_offset,
         "num_validation_points": len(grid_pts_A),
         "validation_grid_A": grid_pts_A,
         "validation_grid_B": grid_pts_B

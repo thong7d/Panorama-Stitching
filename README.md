@@ -6,10 +6,10 @@ Dao Quoc Tuan (23120392).
 
 This repository implements and parallelizes an end-to-end **Panorama Image Stitching** pipeline using CUDA and modern C++17, comprising:
 1. **Stage 1 (Preprocessing):** Luminance grayscale conversion ($Y = 0.299R + 0.587G + 0.114B$) and 5×5 Gaussian convolution ($\sigma = 1.0$).
-2. **Stage 2 (Detection):** FAST-9 Corner Detector ($T=20$), 3×3 Non-Maximum Suppression (NMS), and deterministic Top-$K$ selection ($K=1000$) ordered by `(response DESC, linear_index ASC)`.
+2. **Stage 2 (Detection):** FAST-9 Corner Detector ($T=20$), 3×3 Non-Maximum Suppression (NMS), and deterministic Top-$K$ selection ($K=2000$) ordered by `(response DESC, linear_index ASC)`.
 3. **Stage 3 (Description):** Oriented BRIEF / ORB 256-bit descriptor (8 words $\times$ 32-bit `uint32_t`), 256 OpenCV `bit_pattern_31_` test pairs, orientation angle via Intensity Centroid ($31\times 31$ patch), and border margin filtering ($R < 20$ px).
 4. **Stage 4 (Matching):** Brute-force Hamming distance matching (hardware popcount) combined with Lowe's Ratio Test ($\text{dist}_1 < 0.75 \times \text{dist}_2$).
-5. **Stage 5 (Homography Estimation):** RANSAC (2000 hypotheses), 4-point Normalized DLT (Hartley isotropic scaling), Gauss-Jordan elimination with relative partial pivoting, finite value checks, and deterministic LCG PRNG (seed 42).
+5. **Stage 5 (Transform Estimation):** RANSAC homography (2000 hypotheses), normalized DLT and deterministic refit, followed by geometric plausibility checks. Degenerate projective models fall back to a robust median translation estimated from displacement consensus; metrics record the selected model.
 6. **Stage 6 (Warping & Blending):** Inverse perspective warping in Frame A coordinates, bilinear interpolation sampling, and symmetric distance-to-border feathering blending.
 
 ---
@@ -28,7 +28,7 @@ Prj/
 │   ├── v0_sequential.h / .cpp # 6-stage single-thread C++ pipeline (Golden Reference Baseline)
 │   └── main.cu                # CLI entrypoint, telemetry metrics exporter, Amdahl speedup analysis
 ├── scripts/
-│   ├── preprocess_dataset.py  # PNG/JPEG/HEIC loader, EXIF orientation, 16:9 center crop, multi-resolution export
+│   ├── preprocess_dataset.py  # Loader, EXIF orientation, configurable 16:9/overlap crop, multi-resolution export
 │   ├── generate_synthetic_test.py # Synthetic scene generator with exact projective homography and grid points
 │   ├── validate_metrics.py    # JSON metrics schema validator (Plan v4 Section 4.3)
 │   ├── validate_homography.py # OpenCV reference + cross-resolution H checks
@@ -42,9 +42,9 @@ Prj/
 │   ├── manifest.json          # Dataset manifest catalog (indoor, outdoor, custom, challenging, provided)
 │   ├── synthetic/             # Synthetic images with ground_truth.json across 3 resolutions
 │   ├── site1_indoor/          # Indoor kitchen/utility-room scene
-│   ├── site2_outdoor/         # Low-texture open-field scene
-│   ├── site3_custom/          # Building courtyard/residential scene
-│   ├── challenging/           # Low-light urban rooftop scene
+│   ├── site2_outdoor/         # Urban rooftop/temple-roof scene
+│   ├── site3_custom/          # Rooftop service corridor with repetitive mesh
+│   ├── challenging/           # Close-range indoor kitchen/work-area scene
 │   └── provided/              # Slot for instructor-provided dataset (external blocker)
 ├── notebooks/
 │   └── Group19_Midterm.ipynb  # Executed Midterm notebook with saved outputs
@@ -96,7 +96,7 @@ make cpu
 
 ## 🌐 Dataset & Google Drive Storage
 
-The complete raw image dataset (including raw camera PNG files and high-resolution preprocessed images) is hosted on Google Drive:
+The complete raw image dataset (including raw camera JPEG files and high-resolution preprocessed images) is hosted on Google Drive:
 - **Google Drive Dataset Folder:** [CSC14120 Panorama Dataset](https://drive.google.com/drive/folders/1vnD51fqHjY-HGqp365dTa1SX_0femIwG?usp=drive_link)
 - **Included Content:** Raw captures for `site1_indoor`, `site2_outdoor`, `site3_custom`, `challenging`, and `synthetic` ground truth.
 
