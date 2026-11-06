@@ -82,10 +82,12 @@ void CudaWorkspace::allocate(int w, int h) {
     CHECK_CUDA(cudaMalloc(&d_matches,  MAX_MATCHES * sizeof(Match)));
     CHECK_CUDA(cudaMalloc(&d_nmatches, sizeof(int)));
 
-    // ---- Stage 5: RANSAC (Tuấn phụ trách) ----
-    CHECK_CUDA(cudaMalloc(&d_inlier_counts, MAX_RANSAC_HYPOTHESES * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d_all_H,         MAX_RANSAC_HYPOTHESES * 9 * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_best_hyp,      sizeof(int)));
+    // ---- Stage 5: RANSAC (Thông phụ trách - Plan v4 Mục 18.2) ----
+    CHECK_CUDA(cudaMalloc(&d_sample_indices, MAX_RANSAC_HYPOTHESES * 4 * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&d_inlier_counts,  MAX_RANSAC_HYPOTHESES * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&d_all_H,          MAX_RANSAC_HYPOTHESES * 9 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_best_hyp,       sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&d_ransac_result,  sizeof(GpuRansacResult)));
 
     // ---- Stage 6: Panorama output (Tuấn phụ trách) ----
     const size_t CANVAS = static_cast<size_t>(canvas_w) * canvas_h;
@@ -145,9 +147,11 @@ void CudaWorkspace::free_all() {
     safe_free(reinterpret_cast<void*&>(d_descB));
     safe_free(reinterpret_cast<void*&>(d_matches));
     safe_free(reinterpret_cast<void*&>(d_nmatches));
+    safe_free(reinterpret_cast<void*&>(d_sample_indices));
     safe_free(reinterpret_cast<void*&>(d_inlier_counts));
     safe_free(reinterpret_cast<void*&>(d_all_H));
     safe_free(reinterpret_cast<void*&>(d_best_hyp));
+    safe_free(reinterpret_cast<void*&>(d_ransac_result));
     safe_free(reinterpret_cast<void*&>(d_pano));
     safe_free(reinterpret_cast<void*&>(d_canvas_bounds));
     sort_tmp_bytes = 0;
@@ -306,20 +310,23 @@ PipelineResult run_v1_basic_cuda(const Image& imgA, const Image& imgB, int runs)
         }
 
         // ================================================================
-        // Stage 5: RANSAC Homography — CPU STUB
-        // TODO: Thay bằng stage5_ransac_gpu() khi Tuấn triển khai
+        // Stage 5: RANSAC Homography — GPU (Thông phụ trách - Plan v4 Mục 18.2)
         // ================================================================
         float t_s5 = 0.0f;
         Homography best_H{};
         int inliers = 0;
         bool homo_ok = false;
         {
-            // [STUB] Gọi V0 CPU RANSAC
-            homo_ok = stage5_ransac_homography_cpu(
-                matches, h_kpA, h_kpB, best_H, inliers, t_s5, w, h);
-            // TODO(Tuấn): Thay bằng GPU kernel, đo bằng cudaEvent
-            //   stage5_ransac_gpu(ws.d_matches, n_matches, ws.d_kpA, ws.d_kpB,
-            //                     ws.d_all_H, ws.d_inlier_counts, ws.d_best_hyp, ...);
+            int n_matches = static_cast<int>(matches.size());
+            if (n_matches > 0) {
+                CHECK_CUDA(cudaMemcpy(ws.d_matches, matches.data(), n_matches * sizeof(Match), cudaMemcpyHostToDevice));
+            }
+            CHECK_CUDA(cudaMemcpy(ws.d_nmatches, &n_matches, sizeof(int), cudaMemcpyHostToDevice));
+
+            // Gọi GPU kernel Stage 5
+            homo_ok = stage5_ransac_gpu(
+                ws.d_matches, n_matches, ws.d_kpA, ws.d_kpB,
+                ws, w, h, best_H, inliers, t_s5);
         }
 
         // ================================================================

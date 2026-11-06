@@ -21,7 +21,7 @@ NVCC_FLAGS = -O3 -arch=sm_75 -std=c++17 -Xcompiler -Wall,-Wextra,-Wno-missing-fi
 CXX_FLAGS = -O3 -std=c++17 -Wall -Wextra -Wno-missing-field-initializers
 
 CPU_SRCS = src/main.cu src/stb_impl.cpp src/v0_sequential.cpp
-CUDA_SRCS = $(CPU_SRCS) src/cuda_pipeline.cu src/cuda_stage1_preprocess.cu src/cuda_stage2_fast_nms_topk.cu
+CUDA_SRCS = $(CPU_SRCS) src/cuda_pipeline.cu src/cuda_stage1_preprocess.cu src/cuda_stage2_fast_nms_topk.cu src/cuda_stage5_ransac.cu
 TARGET = stitch
 TEST_TARGET = test_cpu
 

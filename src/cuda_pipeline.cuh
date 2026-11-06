@@ -45,6 +45,13 @@ constexpr int MAX_MATCHES = MAX_KEYPOINTS;
 // Capacity RANSAC hypotheses
 constexpr int MAX_RANSAC_HYPOTHESES = RANSAC_ITERS; // 2000
 
+// Kết quả trung gian của Stage 5 trên GPU
+struct GpuRansacResult {
+    Homography H;
+    int inliers;
+    bool success;
+};
+
 // ============================================================================
 // CUDA WORKSPACE - RAII quản lý toàn bộ bộ nhớ GPU của V1
 // Cấp phát một lần trước warm-up, tái sử dụng cho mọi benchmark run.
@@ -101,13 +108,12 @@ struct CudaWorkspace {
     Match*  d_matches   = nullptr;   // Matches A→B         [MAX_MATCHES]
     int*    d_nmatches  = nullptr;   // Số matches hợp lệ (scalar)
 
-    // ---- Stage 5: RANSAC (Tuấn phụ trách) ----
-    // Inlier counts per hypothesis
-    int*    d_inlier_counts = nullptr; // [MAX_RANSAC_HYPOTHESES]
-    // Best H candidate (9 floats × MAX_RANSAC_HYPOTHESES)
-    float*  d_all_H    = nullptr;    // [MAX_RANSAC_HYPOTHESES × 9]
-    // Best hypothesis index (scalar, written by argmax kernel)
-    int*    d_best_hyp  = nullptr;
+    // ---- Stage 5: RANSAC (Thông phụ trách - Plan v4 Mục 18.2) ----
+    int*    d_sample_indices = nullptr; // Bảng 2000×4 indices sinh bởi LCG [MAX_RANSAC_HYPOTHESES * 4]
+    int*    d_inlier_counts = nullptr;  // Số inliers cho từng hypothesis  [MAX_RANSAC_HYPOTHESES]
+    float*  d_all_H         = nullptr;  // Ma trận H cho từng hypothesis   [MAX_RANSAC_HYPOTHESES * 9]
+    int*    d_best_hyp      = nullptr;  // Chỉ số hypothesis tối ưu        [1 int]
+    GpuRansacResult* d_ransac_result = nullptr; // Kết quả RANSAC trên device [1 struct]
 
     // ---- Stage 6: Panorama output (Tuấn phụ trách) ----
     uchar4* d_pano      = nullptr;   // Output panorama     [4 × MAX_CANVAS]
@@ -180,6 +186,26 @@ float stage2_fast_nms_topk_gpu(const float*  d_blur,
                                 void*         d_sort_tmp,
                                 size_t        sort_tmp_bytes,
                                 int w, int h, int K);
+
+// Stage 5: RANSAC Homography + Fallback Translation (Thông phụ trách - Plan v4 Mục 18.2)
+// d_matches:   input  — mảng Match trên GPU [n_matches]
+// n_matches:   input  — số lượng cặp khớp M
+// d_kpA, d_kpB:input  — mảng Keypoint A và B trên GPU
+// ws:          buffer — tham chiếu CudaWorkspace chứa các GPU buffer trung gian
+// image_w, image_h:   — kích thước ảnh phục vụ kiểm tra hình học & fallback
+// best_H:      output — kết quả ma trận Homography cuối cùng
+// out_inliers: output — số lượng inliers của mô hình tốt nhất
+// elapsed_ms:  output — thời gian thực thi thuần trên GPU đo bằng cudaEvent
+bool stage5_ransac_gpu(const Match*    d_matches,
+                       int             n_matches,
+                       const Keypoint* d_kpA,
+                       const Keypoint* d_kpB,
+                       CudaWorkspace&  ws,
+                       int image_w,
+                       int image_h,
+                       Homography&     best_H,
+                       int&            out_inliers,
+                       float&          elapsed_ms);
 
 // ============================================================================
 // PIPELINE ENTRY POINT — V1 Basic CUDA
