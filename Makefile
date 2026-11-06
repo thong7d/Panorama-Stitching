@@ -53,5 +53,9 @@ test:
 	fi
 
 clean:
+ifeq ($(OS),Windows_NT)
+	-@del /f /q $(TARGET).exe $(TARGET) $(TEST_TARGET).exe $(TEST_TARGET) *.o *.obj 2>nul || exit 0
+else
 	rm -f $(TARGET) $(TEST_TARGET) *.o *.obj
+endif
 	@echo "[OK] Cleaned build artifacts."
