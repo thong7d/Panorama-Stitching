@@ -4,6 +4,12 @@
 **Group 19:** Pham Minh Thong (23120364), Nguyen Le Tan Tien (23120369),
 Dao Quoc Tuan (23120392).
 
+The Midterm milestone is complete. For the Final work, use the single
+[20-day execution guide in project_plan_v4.md](project_plan_v4.md#final-start)
+(05–24 November 2026), including the named assignments, daily timeline,
+stage input/output contracts and acceptance checklists. Agents follow
+[AGENTS.md](AGENTS.md) and the same guide.
+
 This repository implements and parallelizes an end-to-end **Panorama Image Stitching** pipeline using CUDA and modern C++17, comprising:
 1. **Stage 1 (Preprocessing):** Luminance grayscale conversion ($Y = 0.299R + 0.587G + 0.114B$) and 5×5 Gaussian convolution ($\sigma = 1.0$).
 2. **Stage 2 (Detection):** FAST-9 Corner Detector ($T=20$), 3×3 Non-Maximum Suppression (NMS), and deterministic Top-$K$ selection ($K=2000$) ordered by `(response DESC, linear_index ASC)`.

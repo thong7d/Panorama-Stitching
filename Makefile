@@ -20,7 +20,8 @@ NVCC_FLAGS = -O3 -arch=sm_75 -std=c++17 -Xcompiler -Wall,-Wextra,-Wno-missing-fi
 # CPU host compiler flags
 CXX_FLAGS = -O3 -std=c++17 -Wall -Wextra -Wno-missing-field-initializers
 
-SRCS = src/main.cu src/stb_impl.cpp src/v0_sequential.cpp
+CPU_SRCS = src/main.cu src/stb_impl.cpp src/v0_sequential.cpp
+CUDA_SRCS = $(CPU_SRCS) src/cuda_pipeline.cu src/cuda_stage1_preprocess.cu src/cuda_stage2_fast_nms_topk.cu
 TARGET = stitch
 TEST_TARGET = test_cpu
 
@@ -34,13 +35,13 @@ else
 endif
 
 # Build CUDA binary for Google Colab Tesla T4
-cuda: $(SRCS)
-	$(NVCC) $(NVCC_FLAGS) $(SRCS) -o $(TARGET)
+cuda: $(CUDA_SRCS)
+	$(NVCC) $(NVCC_FLAGS) $(CUDA_SRCS) -o $(TARGET)
 	@echo "[OK] Build complete with NVCC (CUDA): ./$(TARGET)"
 
 # Build CPU-only binary for Host testing
-cpu: $(SRCS)
-	$(CXX) $(CXX_FLAGS) -x c++ $(SRCS) -o $(TARGET)
+cpu: $(CPU_SRCS)
+	$(CXX) $(CXX_FLAGS) -x c++ $(CPU_SRCS) -o $(TARGET)
 	@echo "[OK] Build complete with C++ (CPU Host-only): ./$(TARGET)"
 
 # Build and execute CPU unit tests (if test sources are available)
