@@ -200,6 +200,17 @@ static StageMetric make_timing_entry(const std::vector<float>& runs) {
 PipelineResult run_v1_basic_cuda(const Image& imgA, const Image& imgB, int runs) {
     PipelineResult result;
     result.version_str = "V1";
+    result.optimization_str = "Basic CUDA Pipeline";
+    result.runs = runs;
+    result.warmups = 1;
+    result.image_width = imgA.w;
+    result.image_height = imgA.h;
+    cudaDeviceProp prop{};
+    if (cudaGetDeviceProperties(&prop, 0) == cudaSuccess) {
+        result.device_name = prop.name;
+    } else {
+        result.device_name = "CUDA GPU";
+    }
 
     const int w = imgA.w;
     const int h = imgA.h;
