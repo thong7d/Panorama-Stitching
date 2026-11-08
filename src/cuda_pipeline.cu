@@ -169,10 +169,10 @@ static float compute_median(std::vector<float> v) {
 }
 
 // ============================================================================
-// Helper: điền TimingEntry từ vector raw runs
+// Helper: điền StageMetric từ vector raw runs
 // ============================================================================
-static TimingEntry make_timing_entry(const std::vector<float>& runs) {
-    TimingEntry e{};
+static StageMetric make_timing_entry(const std::vector<float>& runs) {
+    StageMetric e{};
     if (runs.empty()) return e;
     float sum = 0.0f;
     float mn  = runs[0];
@@ -235,8 +235,8 @@ PipelineResult run_v1_basic_cuda(const Image& imgA, const Image& imgB, int runs)
         // ---- H2D: Copy ảnh lên GPU ----
         GpuTimer h2d_timer;
         h2d_timer.Start();
-        CHECK_CUDA(cudaMemcpy(ws.d_imgA, imgA.data.data(), N * sizeof(uchar4), cudaMemcpyHostToDevice));
-        CHECK_CUDA(cudaMemcpy(ws.d_imgB, imgB.data.data(), N * sizeof(uchar4), cudaMemcpyHostToDevice));
+        CHECK_CUDA(cudaMemcpy(ws.d_imgA, imgA.data, N * sizeof(uchar4), cudaMemcpyHostToDevice));
+        CHECK_CUDA(cudaMemcpy(ws.d_imgB, imgB.data, N * sizeof(uchar4), cudaMemcpyHostToDevice));
         float t_h2d = h2d_timer.Stop();
 
         // ---- Stage 1: Grayscale + Gaussian Blur (GPU) ----
@@ -416,8 +416,10 @@ PipelineResult run_v1_basic_cuda(const Image& imgA, const Image& imgB, int runs)
 
     // H2D + D2H: lưu vào kernel_total thay vì các stage
     // Plan v4: "H2D/D2H measured separately and reported in JSON"
-    TimingEntry h2d_entry  = make_timing_entry(t_h2d);
-    TimingEntry d2h_entry  = make_timing_entry(t_d2h);
+    StageMetric h2d_entry  = make_timing_entry(t_h2d);
+    StageMetric d2h_entry  = make_timing_entry(t_d2h);
+    result.timings.h2d = h2d_entry;
+    result.timings.d2h = d2h_entry;
 
     result.timings.stage1_preprocess      = make_timing_entry(t_s1);
     result.timings.stage2_fast_nms_topk   = make_timing_entry(t_s2);
