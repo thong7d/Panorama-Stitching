@@ -129,9 +129,10 @@ int main(int argc, char** argv) {
         result.device_name = device_name;
 #if defined(__CUDACC__) || defined(__CUDA_RUNTIME_H__)
     } else if (version == 1) {
-        // V1: Basic CUDA — Stage 1+2 GPU, Stage 3-6 CPU stub (Phase C)
-        // Stage 3-4 GPU: TODO Nguyen Le Tan Tien (23120369)
-        // Stage 5-6 GPU: TODO Dao Quoc Tuan (23120392)
+        // V1: Basic CUDA Scaffold (Phase C, Plan v4 Mục 18)
+        // Stage 1 & 5 GPU: Phạm Minh Thông (23120364) — ĐÃ HOÀN TẤT
+        // Stage 2 & 3 GPU: Nguyễn Lê Tấn Tiến (23120369)
+        // Stage 4 & 6 GPU: Đào Quốc Tuấn (23120392)
         result = run_v1_basic_cuda(imgA, imgB, runs);
         result.device_name = device_name;
 #endif

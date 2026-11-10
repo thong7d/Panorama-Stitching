@@ -1,13 +1,15 @@
 // ============================================================================
 // CSC14120 - Lập trình song song
 // Đồ án: Ghép ảnh Panorama
-// Module: CudaWorkspace + V1 Pipeline Declarations (Phase C, Plan v4 Mục 8)
-// Tác giả: Pham Minh Thong (23120364)
-// Phụ trách: Thiết kế bộ nhớ GPU tĩnh (CudaWorkspace), Stage 1, Stage 2 kernels
-//            và điều phối viên run_v1_basic_cuda
-// Phụ trách Stage 3: Nguyen Le Tan Tien (23120369)
-// Phụ trách Stage 4: Nguyen Le Tan Tien (23120369)
-// Phụ trách Stage 5+6: Dao Quoc Tuan (23120392)
+// Module: CudaWorkspace + V1 Pipeline Declarations (Phase C, Plan v4 Mục 8 & 18)
+// Phụ trách & Trưởng nhóm: Pham Minh Thong (23120364)
+//   - Thiết kế CudaWorkspace, Stage 1 (Preprocess), Stage 5 (RANSAC DLT GPU)
+//   - Dispatcher run_v1_basic_cuda, Makefile & Tích hợp hệ thống
+//   - Khởi tạo nền tảng Stage 2 FAST+NMS+TopK để bàn giao
+// Phụ trách Stage 2 & 3: Nguyen Le Tan Tien (23120369)
+//   - Tiếp nhận Stage 2 và triển khai Stage 3 (ORB Descriptors GPU)
+// Phụ trách Stage 4 & 6: Dao Quoc Tuan (23120392)
+//   - Triển khai Stage 4 (Hamming Matching GPU) & Stage 6 (Warp/Blend GPU)
 // External sources: Tài liệu NVIDIA CUDA Best Practices Guide, CUDA C++ Programming
 //   Guide (developer.nvidia.com). Không sao chép kernel từ nguồn ngoài.
 // ============================================================================
@@ -17,9 +19,10 @@
 #include "common.h"
 #include "cuda_utils.cuh"
 #include <cstddef>
+#include <cstdint>
 
 // ============================================================================
-// CAPACITY CONSTANTS (Plan v4 Mục C.3)
+// CAPACITY CONSTANTS (Plan v4 Mục C.3 & Section 3.1)
 // Tất cả capacity được định nghĩa ở đây để Stage 1-6 dùng chung và nhất quán.
 // Thay đổi chỉ ở một chỗ, không rải hằng số khắp nơi.
 // ============================================================================
@@ -28,6 +31,14 @@
 constexpr int MAX_IMG_W    = 3840;
 constexpr int MAX_IMG_H    = 2160;
 constexpr int MAX_PIXELS   = MAX_IMG_W * MAX_IMG_H; // 8.294.400 pixels
+
+// Hệ số an toàn và giới hạn kích thước Canvas (Plan v4 Mục 3.1 & 18.2)
+// Giới hạn an toàn: tối đa 4× mỗi chiều và 16× số pixel lớn nhất của input
+constexpr int    MAX_CANVAS_DIM_FACTOR    = 4;
+constexpr size_t MAX_CANVAS_PIXELS_FACTOR = 16;
+// Hệ số dung lượng cấp phát tĩnh trước cho canvas panorama (8× w×h)
+// Hỗ trợ mọi ma trận H hợp lệ theo tiêu chí hình học Plan v4 (bao gồm fixture 3200x1200 = 4.167N)
+constexpr size_t PANO_CAPACITY_FACTOR     = 8;
 
 // Capacity cho FAST candidate buffer (Mục C.3: bounded w×h, không hơn)
 // Thực tế ≪ w×h vì FAST + border constraint lọc rất nhiều
@@ -51,6 +62,26 @@ struct GpuRansacResult {
     int inliers;
     bool success;
 };
+
+// ============================================================================
+// CANVAS BOUNDS (Plan v4 Mục 3.1 & 18.2)
+// Tọa độ canvas nằm trong frame A.
+// x_min, y_min có thể âm nếu ảnh B nằm dịch sang trái hoặc lên trên frame A.
+// ============================================================================
+struct CanvasBounds {
+    int x_min = 0;
+    int y_min = 0;
+    int x_max = 0;
+    int y_max = 0;
+    int width = 0;
+    int height = 0;
+    size_t total_pixels = 0;
+    bool is_valid = false;
+};
+
+// Hàm tính toán và kiểm tra tính hợp lệ hình học của Canvas Bounds
+// Dùng chung cho cả V0, V1 scaffold và kernel Stage 6 GPU của Tuấn
+CanvasBounds compute_canvas_bounds(int wA, int hA, int wB, int hB, const Homography& H_A_to_B);
 
 // ============================================================================
 // CUDA WORKSPACE - RAII quản lý toàn bộ bộ nhớ GPU của V1
@@ -80,16 +111,12 @@ struct CudaWorkspace {
     int*    d_nkpB      = nullptr;   // Số lượng kp B (scalar)
 
     // Intermediate: candidate buffer (trước Top-K)
-    // Layout: [idx (int), response (float)] interleaved để sorting
-    // Dùng struct nhỏ gọn hơn Keypoint để sort nhanh hơn
-    // Thực chất là Keypoint array — dùng Keypoint struct sẵn có
     Keypoint* d_candA   = nullptr;   // Candidates A        [MAX_CANDIDATES]
     Keypoint* d_candB   = nullptr;   // Candidates B        [MAX_CANDIDATES]
     int*    d_ncandA    = nullptr;   // Số candidates A (atomic counter)
     int*    d_ncandB    = nullptr;   // Số candidates B (atomic counter)
 
-    // Temporary sort buffer (CUB DeviceRadixSort scratch)
-    // Stage 2 sẽ cấp phát d_sort_tmp động trong lần đầu tiên nếu cần
+    // Temporary sort buffer (CUB DeviceRadixSort scratch - pre-allocated trong allocate)
     void*   d_sort_tmp  = nullptr;
     size_t  sort_tmp_bytes = 0;
 
@@ -100,11 +127,10 @@ struct CudaWorkspace {
     uint32_t* d_sort_valsB   = nullptr;
 
     // ---- Stage 3: ORB Descriptors (Tiến phụ trách) ----
-    // Mỗi Descriptor = 32 bytes = 8 × uint32_t (alignas 16)
     Descriptor* d_descA = nullptr;   // Descriptors A       [MAX_DESCRIPTORS]
     Descriptor* d_descB = nullptr;   // Descriptors B       [MAX_DESCRIPTORS]
 
-    // ---- Stage 4: Matches (Tiến phụ trách) ----
+    // ---- Stage 4: Matches (Tuấn phụ trách) ----
     Match*  d_matches   = nullptr;   // Matches A→B         [MAX_MATCHES]
     int*    d_nmatches  = nullptr;   // Số matches hợp lệ (scalar)
 
@@ -115,12 +141,13 @@ struct CudaWorkspace {
     int*    d_best_hyp      = nullptr;  // Chỉ số hypothesis tối ưu        [1 int]
     GpuRansacResult* d_ransac_result = nullptr; // Kết quả RANSAC trên device [1 struct]
 
-    // ---- Stage 6: Panorama output (Tuấn phụ trách) ----
-    uchar4* d_pano      = nullptr;   // Output panorama     [4 × MAX_CANVAS]
-    // Canvas bounds (4 × int: min_x, max_x, min_y, max_y) — small control copy
-    int*    d_canvas_bounds = nullptr;  // [4]
+    // ---- Stage 6: Panorama output & Mask (Tuấn phụ trách) ----
+    uchar4* d_pano          = nullptr;  // Output panorama buffer  [pano_capacity × uchar4]
+    uint8_t* d_pano_mask    = nullptr;  // Validity/blend mask     [pano_capacity × uint8_t]
+    int*    d_canvas_bounds = nullptr;  // Canvas bounds device    [6 × int: x_min, y_min, x_max, y_max, w, h]
+    size_t  pano_capacity   = 0;        // Số pixel tối đa cấp phát cho panorama
 
-    // ---- Image dimensions (set at allocate time) ----
+    // ---- Image dimensions & Canvas parameters ----
     int img_w = 0;
     int img_h = 0;
     int canvas_w = 0;
@@ -130,24 +157,26 @@ struct CudaWorkspace {
     CudaWorkspace() = default;
 
     // Cấp phát toàn bộ GPU memory theo kích thước ảnh đầu vào.
+    // Kiểm tra VRAM thực tế trước khi cấp phát, đảm bảo không vượt quá dung lượng.
     // Phải gọi một lần duy nhất trước warm-up run.
-    // canvas_w và canvas_h ước lượng (2×img_w × img_h) cho safe bound.
     void allocate(int w, int h);
 
-    // Reset atomic counters giữa các benchmark run (không deallocate).
+    // Reset atomic counters và kết quả device giữa các benchmark run (không deallocate).
     // Phải gọi trước mỗi run kể cả warm-up.
     void reset_counters();
 
-    // Giải phóng toàn bộ GPU memory — gọi từ destructor.
+    // Giải phóng toàn bộ GPU memory an toàn (idempotent: gọi lặp lại không lỗi).
     void free_all();
 
     ~CudaWorkspace() { free_all(); }
 
-    // Cấm copy, cho phép move
+    // Cấm copy (tránh double-free VRAM)
     CudaWorkspace(const CudaWorkspace&) = delete;
     CudaWorkspace& operator=(const CudaWorkspace&) = delete;
-    CudaWorkspace(CudaWorkspace&&) = default;
-    CudaWorkspace& operator=(CudaWorkspace&&) = default;
+
+    // Cho phép move có kiểm soát (chuyển quyền sở hữu VRAM an toàn)
+    CudaWorkspace(CudaWorkspace&& other) noexcept;
+    CudaWorkspace& operator=(CudaWorkspace&& other) noexcept;
 };
 
 // ============================================================================
@@ -196,6 +225,12 @@ float stage2_fast_nms_topk_gpu(const float*  d_blur,
 // best_H:      output — kết quả ma trận Homography cuối cùng
 // out_inliers: output — số lượng inliers của mô hình tốt nhất
 // elapsed_ms:  output — thời gian thực thi thuần trên GPU đo bằng cudaEvent
+// Kernel sinh mẫu ngẫu nhiên RANSAC bằng LCG seed 42 trên GPU (Plan v4 Mục 18.2)
+__global__ void kernel_ransac_generate_samples(
+    int* __restrict__ d_samples,
+    int n_matches,
+    int iters);
+
 bool stage5_ransac_gpu(const Match*    d_matches,
                        int             n_matches,
                        const Keypoint* d_kpA,
@@ -206,6 +241,64 @@ bool stage5_ransac_gpu(const Match*    d_matches,
                        Homography&     best_H,
                        int&            out_inliers,
                        float&          elapsed_ms);
+
+// ============================================================================
+// API CONTRACT FOR TIẾN (STAGE 3 — ORB DESCRIPTORS)
+// File đích: src/cuda_stage3_orb.cu do Nguyễn Lê Tấn Tiến triển khai
+// - d_blur: ảnh xám làm mịn trên GPU (float, w*h)
+// - d_kp: mảng keypoints trên GPU (Keypoint[MAX_KEYPOINTS])
+// - n_kp: số keypoint thực tế (<= MAX_KEYPOINTS)
+// - d_desc: mảng descriptors xuất ra trên GPU (Descriptor[MAX_DESCRIPTORS])
+// - w, h: kích thước ảnh gốc
+// Trả về thời gian thực thi kernel GPU đo bằng cudaEvent (ms).
+// ============================================================================
+float stage3_orb_descriptors_gpu(const float*    d_blur,
+                                 const Keypoint* d_kp,
+                                 int             n_kp,
+                                 Descriptor*     d_desc,
+                                 int w, int h,
+                                 cudaStream_t stream = 0);
+
+// ============================================================================
+// API CONTRACT FOR TUẤN (STAGE 4 — HAMMING MATCHING)
+// File đích: src/cuda_stage4_matching.cu do Đào Quốc Tuấn triển khai
+// - d_descA: mảng descriptor A (Descriptor[nA])
+// - d_descB: mảng descriptor B (Descriptor[nB])
+// - nA, nB: số lượng keypoints ảnh A và B (<= MAX_KEYPOINTS)
+// - d_matches: mảng lưu cặp khớp xuất ra trên GPU (Match[MAX_MATCHES])
+// - d_nmatches: con trỏ scalar trên device lưu số matches (atomic counter)
+// - ratio_threshold: ngưỡng Lowe's ratio test (mặc định MATCH_RATIO = 0.75f)
+// Trả về thời gian thực thi kernel GPU đo bằng cudaEvent (ms).
+// ============================================================================
+float stage4_matching_gpu(const Descriptor* d_descA,
+                          int               nA,
+                          const Descriptor* d_descB,
+                          int               nB,
+                          Match*            d_matches,
+                          int*              d_nmatches,
+                          float             ratio_threshold = RATIO_THRESH,
+                          cudaStream_t      stream = 0);
+
+// ============================================================================
+// API CONTRACT FOR TUẤN (STAGE 6 — WARPING & BLENDING)
+// File đích: src/cuda_stage6_warp.cu do Đào Quốc Tuấn triển khai
+// - d_imgA, d_imgB: ảnh gốc RGB trên GPU (uchar4, w*h)
+// - img_w, img_h: kích thước ảnh gốc
+// - H_A_to_B: ma trận homography ánh xạ A->B trong hệ tọa độ frame A
+// - bounds: thông số canvas bounds (x_min, y_min, width, height) đã kiểm tra hợp lệ
+// - d_pano: buffer panorama đích trên GPU (uchar4, bounds.total_pixels <= pano_capacity)
+// - d_pano_mask: (tùy chọn) buffer mask nhị phân hợp lệ trên GPU (uint8_t)
+// Trả về thời gian thực thi kernel GPU đo bằng cudaEvent (ms).
+// ============================================================================
+float stage6_warp_blend_gpu(const uchar4*       d_imgA,
+                            const uchar4*       d_imgB,
+                            int                 img_w,
+                            int                 img_h,
+                            const Homography&   H_A_to_B,
+                            const CanvasBounds& bounds,
+                            uchar4*             d_pano,
+                            uint8_t*            d_pano_mask = nullptr,
+                            cudaStream_t        stream = 0);
 
 // ============================================================================
 // PIPELINE ENTRY POINT — V1 Basic CUDA

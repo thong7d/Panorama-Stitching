@@ -71,11 +71,13 @@ __device__ void compute_hartley_norm_dev(
 // ============================================================================
 // Giải hệ DLT 8×8 bằng khử Gauss với Relative Partial Pivoting trên GPU
 // Khớp chính xác V0 solve_dlt_8x8_cpu (v0_sequential.cpp dòng 466-568)
+// Plan v4 Mục 18.2: Ma trận A[8][9] nằm trong shared memory để tránh local stack spilling
 // ============================================================================
 __device__ bool solve_dlt_8x8_dev(
     const float ptsA[4][2],
     const float ptsB[4][2],
-    float H[9])
+    float H[9],
+    float A[8][9])
 {
     float norm_A[4][2], norm_B[4][2];
     float TA[3][3], inv_TA[3][3];
@@ -84,7 +86,7 @@ __device__ bool solve_dlt_8x8_dev(
     compute_hartley_norm_dev(ptsA, norm_A, TA, inv_TA);
     compute_hartley_norm_dev(ptsB, norm_B, TB, inv_TB);
 
-    float A[8][9]; // Ma trận mở rộng [A | b]
+    // Ma trận mở rộng [A | b] nằm trên shared memory A[8][9]
     for (int i = 0; i < 4; i++) {
         float x = norm_A[i][0], y = norm_A[i][1];
         float u = norm_B[i][0], v = norm_B[i][1];
@@ -322,6 +324,7 @@ __global__ void kernel_ransac_hypotheses_and_inliers(
     __shared__ float s_H[9];
     __shared__ bool s_valid;
     __shared__ int s_inliers;
+    __shared__ float s_A[8][9]; // Plan v4 Mục 18.2: DLT matrix 8×9 nằm trong shared memory
 
     if (threadIdx.x == 0) {
         s_inliers = 0;
@@ -339,7 +342,7 @@ __global__ void kernel_ransac_hypotheses_and_inliers(
             ptsB[i][1] = d_kpB[m.idx_b].y;
         }
 
-        s_valid = solve_dlt_8x8_dev(ptsA, ptsB, s_H);
+        s_valid = solve_dlt_8x8_dev(ptsA, ptsB, s_H, s_A);
     }
     __syncthreads();
 
@@ -867,13 +870,15 @@ bool stage5_ransac_gpu(
     best_H.is_valid = false;
     elapsed_ms = 0.0f;
 
-    if (n_matches < 4) {
-        return false;
+    // Reset device result buffer NGAY ĐẦU TIÊN để đảm bảo không lưu trạng thái cũ từ lần chạy trước (Finding C)
+    GpuRansacResult* d_result = ws.d_ransac_result;
+    if (d_result) {
+        CHECK_CUDA(cudaMemset(d_result, 0, sizeof(GpuRansacResult)));
     }
 
-    // Dùng buffer kết quả đã được cấp phát tĩnh trong CudaWorkspace (không cudaMalloc giữa các run)
-    GpuRansacResult* d_result = ws.d_ransac_result;
-    CHECK_CUDA(cudaMemset(d_result, 0, sizeof(GpuRansacResult)));
+    if (d_matches == nullptr || d_kpA == nullptr || d_kpB == nullptr || n_matches < 4) {
+        return false;
+    }
 
     cudaEvent_t ev_start, ev_stop;
     CHECK_CUDA(cudaEventCreate(&ev_start));

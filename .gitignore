@@ -38,3 +38,29 @@ Nayar,*.pdf
 
 *.pptx
 presentation_script.md
+
+# Temporary scratch files, patches & transfer chunks
+chunk*.txt
+rem_*.txt
+*.patch
+*.diff
+*.b64
+batch*.txt
+make_batches.ps1
+make_chunks.ps1
+pipe_*.txt
+s5_*.txt
+test_*.txt
+chk_*.txt
+generate_transfers.js
+make_transfers.js
+w_*.py
+x_*.py
+batch*.py
+full_unpack.py
+p*.txt
+b64_part*.txt
+tar_part*.py
+gen_tar_parts.py
+transfer.tar.gz.b64
+test_cuda

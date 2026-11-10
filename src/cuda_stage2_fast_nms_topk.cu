@@ -2,8 +2,8 @@
 // CSC14120 - Lập trình song song
 // Đồ án: Ghép ảnh Panorama
 // Module: Stage 2 CUDA Kernels — FAST-9 Detection + 3×3 NMS + Deterministic Top-K
-// Tác giả: Pham Minh Thong (23120364)
-// Phụ trách: Stage 2 GPU kernels (phát hiện điểm đặc trưng)
+// Tác giả khởi tạo nền tảng: Pham Minh Thong (23120364)
+// Phụ trách & Tiếp nhận quản lý: Nguyen Le Tan Tien (23120369)
 // External sources: Thuật toán FAST-9 theo Rosten & Drummond (2006);
 //   offset vòng tròn Bresenham bán kính 3 và shortcut điều kiện từ V0
 //   (v0_sequential.cpp Stage 2). CUB DeviceRadixSort từ CUDA Toolkit
@@ -286,25 +286,26 @@ float stage2_fast_nms_topk_gpu(const float*  d_blur,
     uint32_t* d_vals_out = d_sort_vals + MAX_CANDIDATES;
 
     // --- Pass 4: CUB DeviceRadixSort (ascending key = response DESC, index ASC) ---
-    // Kiểm tra/cấp phát temp storage nếu chưa đủ
+    // d_sort_tmp đã được cấp phát tĩnh trong CudaWorkspace::allocate
+    // Tuyệt đối không cudaMalloc/cudaFree trong vòng lặp timed loop (Plan v4 Section 20.4)
     size_t required_bytes = 0;
-    cub::DeviceRadixSort::SortPairs(nullptr, required_bytes,
-                                     d_sort_keys, d_keys_out,
-                                     d_sort_vals, d_vals_out,
-                                     n_cand);
-    void* tmp_storage = d_sort_tmp;
-    if (tmp_storage == nullptr || sort_tmp_bytes < required_bytes) {
-        // Caller chưa cấp phát (hoặc quá nhỏ) — cấp phát tạm thời
-        CHECK_CUDA(cudaMalloc(&tmp_storage, required_bytes));
-    }
-    CHECK_CUDA(cub::DeviceRadixSort::SortPairs(tmp_storage, required_bytes,
+    CHECK_CUDA(cub::DeviceRadixSort::SortPairs(nullptr, required_bytes,
                                                 d_sort_keys, d_keys_out,
                                                 d_sort_vals, d_vals_out,
                                                 n_cand));
-    if (tmp_storage != d_sort_tmp) {
-        // Giải phóng buffer tạm thời đã cấp phát nội bộ
-        CHECK_CUDA(cudaFree(tmp_storage));
+    if (d_sort_tmp == nullptr || sort_tmp_bytes < required_bytes) {
+        std::cerr << "[Lỗi Stage 2] d_sort_tmp chưa cấp phát hoặc nhỏ hơn required_bytes: "
+                  << sort_tmp_bytes << " < " << required_bytes << "\n";
+        int zero = 0;
+        CHECK_CUDA(cudaMemcpy(d_nkp, &zero, sizeof(int), cudaMemcpyHostToDevice));
+        CHECK_CUDA(cudaEventDestroy(ev_sort_start));
+        CHECK_CUDA(cudaEventDestroy(ev_sort_stop));
+        return -1.0f;
     }
+    CHECK_CUDA(cub::DeviceRadixSort::SortPairs(d_sort_tmp, required_bytes,
+                                                d_sort_keys, d_keys_out,
+                                                d_sort_vals, d_vals_out,
+                                                n_cand));
     CHECK_CUDA(cudaGetLastError());
 
     // --- Pass 5: Scatter Top-K vào d_kp ---

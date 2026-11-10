@@ -79,6 +79,12 @@ float stage1_preprocess_gpu(const uchar4* d_rgb,
                              float*        d_gray,
                              float*        d_blur,
                              int w, int h) {
+    if (d_rgb == nullptr || d_gray == nullptr || d_blur == nullptr ||
+        w <= 0 || h <= 0 || w > MAX_IMG_W || h > MAX_IMG_H) {
+        std::cerr << "[Lỗi Stage 1] Tham số đầu vào không hợp lệ: " << w << "x" << h << "\n";
+        return 0.0f;
+    }
+
     // Lưới 2D 16×16 — Plan v4 C.3: "Block 16×16 cho 2D image kernels"
     dim3 block(16, 16);
     dim3 grid((w + 15) / 16, (h + 15) / 16);

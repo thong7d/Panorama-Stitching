@@ -21,9 +21,11 @@ NVCC_FLAGS = -O3 -arch=sm_75 -std=c++17 -Xcompiler -Wall,-Wextra,-Wno-missing-fi
 CXX_FLAGS = -O3 -std=c++17 -Wall -Wextra -Wno-missing-field-initializers
 
 CPU_SRCS = src/main.cu src/stb_impl.cpp src/v0_sequential.cpp
-CUDA_SRCS = $(CPU_SRCS) src/cuda_pipeline.cu src/cuda_stage1_preprocess.cu src/cuda_stage2_fast_nms_topk.cu src/cuda_stage5_ransac.cu
+CUDA_LIB_SRCS = src/stb_impl.cpp src/v0_sequential.cpp src/cuda_pipeline.cu src/cuda_stage1_preprocess.cu src/cuda_stage2_fast_nms_topk.cu src/cuda_stage5_ransac.cu
+CUDA_SRCS = src/main.cu $(CUDA_LIB_SRCS)
 TARGET = stitch
 TEST_TARGET = test_cpu
+CUDA_TEST_TARGET = test_cuda
 
 HAS_NVCC := $(shell which $(NVCC) 2>/dev/null)
 
@@ -52,10 +54,15 @@ test:
 		echo "[INFO] tests/test_cpu.cpp không nằm trong gói nộp bài (chỉ dùng cho kiểm thử nội bộ)."; \
 	fi
 
+# Build and execute CUDA unit tests for Phase C (Tesla T4 / NVCC)
+test_cuda: $(CUDA_LIB_SRCS) tests/test_cuda.cu
+	$(NVCC) $(NVCC_FLAGS) -Isrc $(CUDA_LIB_SRCS) tests/test_cuda.cu -o $(CUDA_TEST_TARGET)
+	@echo "[OK] Build complete for CUDA unit test: ./$(CUDA_TEST_TARGET)"
+
 clean:
 ifeq ($(OS),Windows_NT)
-	-@del /f /q $(TARGET).exe $(TARGET) $(TEST_TARGET).exe $(TEST_TARGET) *.o *.obj 2>nul || exit 0
+	-@del /f /q $(TARGET).exe $(TARGET) $(TEST_TARGET).exe $(TEST_TARGET) $(CUDA_TEST_TARGET).exe $(CUDA_TEST_TARGET) *.o *.obj 2>nul || exit 0
 else
-	rm -f $(TARGET) $(TEST_TARGET) *.o *.obj
+	rm -f $(TARGET) $(TEST_TARGET) $(CUDA_TEST_TARGET) *.o *.obj
 endif
 	@echo "[OK] Cleaned build artifacts."
