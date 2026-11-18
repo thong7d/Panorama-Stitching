@@ -14,6 +14,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <string>
+#include <cstring>
 
 #include "cuda_pipeline.cuh"
 #include "v0_sequential.h"
@@ -768,7 +769,309 @@ void test_stage5_cuda_correctness() {
 }
 
 // ============================================================================
+
+// ============================================================================
+// TEST SUITE 6: Stage 4 CUDA Correctness (Tuấn phụ trách — Plan v4 Mục 18.4)
+// Kiểm thử: zero/one/tied descriptors, Lowe's ratio test, thứ tự idx_a tăng dần
+// và đối chiếu 100% kết quả với CPU stage4_matching_cpu.
+// ============================================================================
+void test_stage4_cuda_correctness() {
+    std::cout << "[Test 6] Testing Stage 4 (Hamming Matching + Lowe's Ratio GPU)...\n";
+
+    CudaWorkspace ws;
+    ws.allocate(1280, 720);
+
+    // Test 6.1: Zero/Empty descriptors
+    {
+        int M_zero = -1;
+        float el_zero = stage4_matching_gpu(ws.d_descA, 0, ws.d_descB, 100, ws.d_matches, ws.d_nmatches, RATIO_THRESH);
+        CHECK_CUDA(cudaMemcpy(&M_zero, ws.d_nmatches, sizeof(int), cudaMemcpyDeviceToHost));
+        TEST_ASSERT(M_zero == 0, "Stage 4 with nA=0 must return 0 matches");
+
+        el_zero = stage4_matching_gpu(ws.d_descA, 100, ws.d_descB, 0, ws.d_matches, ws.d_nmatches, RATIO_THRESH);
+        CHECK_CUDA(cudaMemcpy(&M_zero, ws.d_nmatches, sizeof(int), cudaMemcpyDeviceToHost));
+        TEST_ASSERT(M_zero == 0, "Stage 4 with nB=0 must return 0 matches");
+        std::cout << "  -> Test 6.1 (Zero/Empty descriptors return 0 matches): PASS\n";
+    }
+
+    // Test 6.2: Exactly 1 descriptor in B (nB=1, ratio test undefined -> 0 matches)
+    {
+        std::vector<Descriptor> h_descA(10), h_descB(1);
+        std::memset(h_descA.data(), 0, 10 * sizeof(Descriptor));
+        std::memset(h_descB.data(), 0, 1 * sizeof(Descriptor));
+        CHECK_CUDA(cudaMemcpy(ws.d_descA, h_descA.data(), 10 * sizeof(Descriptor), cudaMemcpyHostToDevice));
+        CHECK_CUDA(cudaMemcpy(ws.d_descB, h_descB.data(), 1 * sizeof(Descriptor), cudaMemcpyHostToDevice));
+
+        int M_one = -1;
+        stage4_matching_gpu(ws.d_descA, 10, ws.d_descB, 1, ws.d_matches, ws.d_nmatches, RATIO_THRESH);
+        CHECK_CUDA(cudaMemcpy(&M_one, ws.d_nmatches, sizeof(int), cudaMemcpyDeviceToHost));
+        TEST_ASSERT(M_one == 0, "Stage 4 with nB=1 must return 0 matches (ratio test undefined without 2nd neighbor)");
+        std::cout << "  -> Test 6.2 (Single descriptor nB=1 returns 0 matches): PASS\n";
+    }
+
+    // Test 6.3: Tied descriptors (best1 == best2 -> reject)
+    {
+        std::vector<Descriptor> h_descA(1), h_descB(2);
+        std::memset(h_descA.data(), 0, 1 * sizeof(Descriptor));
+        std::memset(h_descB.data(), 0, 2 * sizeof(Descriptor));
+        // Cả 2 descriptor B đều khác A đúng 10 bits (ví dụ word 0 có 10 bits 1)
+        h_descB[0].words[0] = 0x3FF; // 10 bits 1
+        h_descB[1].words[0] = 0x3FF; // 10 bits 1
+        CHECK_CUDA(cudaMemcpy(ws.d_descA, h_descA.data(), 1 * sizeof(Descriptor), cudaMemcpyHostToDevice));
+        CHECK_CUDA(cudaMemcpy(ws.d_descB, h_descB.data(), 2 * sizeof(Descriptor), cudaMemcpyHostToDevice));
+
+        int M_tie = -1;
+        stage4_matching_gpu(ws.d_descA, 1, ws.d_descB, 2, ws.d_matches, ws.d_nmatches, RATIO_THRESH);
+        CHECK_CUDA(cudaMemcpy(&M_tie, ws.d_nmatches, sizeof(int), cudaMemcpyDeviceToHost));
+        TEST_ASSERT(M_tie == 0, "Stage 4 with tied distances (best1 == best2) must reject match");
+        std::cout << "  -> Test 6.3 (Tied descriptors correctly rejected): PASS\n";
+    }
+
+    // Test 6.4: Lowe's ratio test boundary conditions (0.75 threshold)
+    {
+        // A[0]: best1 = 15, best2 = 20 -> 15 < 0.75 * 20 = 15 is FALSE -> reject
+        // A[1]: best1 = 14, best2 = 20 -> 14 < 0.75 * 20 = 15 is TRUE  -> accept
+        std::vector<Descriptor> h_descA(2), h_descB(2);
+        std::memset(h_descA.data(), 0, 2 * sizeof(Descriptor));
+        std::memset(h_descB.data(), 0, 2 * sizeof(Descriptor));
+
+        // B[0] có 14 bits 1
+        h_descB[0].words[0] = 0x3FFF; // 14 bits
+        // B[1] có 20 bits 1
+        h_descB[1].words[0] = 0xFFFFF; // 20 bits
+
+        // A[0] có 1 bit khác B[0] -> dist(A[0], B[0]) = 15
+        h_descA[0].words[0] = 0x4000;  // dist to B[0] = 14 + 1 = 15, dist to B[1] = 19 bits
+        // A[1] bằng 0 -> dist to B[0] = 14, dist to B[1] = 20 -> ratio = 14 / 20 = 0.70 < 0.75 -> MATCH!
+        h_descA[1].words[0] = 0;
+
+        CHECK_CUDA(cudaMemcpy(ws.d_descA, h_descA.data(), 2 * sizeof(Descriptor), cudaMemcpyHostToDevice));
+        CHECK_CUDA(cudaMemcpy(ws.d_descB, h_descB.data(), 2 * sizeof(Descriptor), cudaMemcpyHostToDevice));
+
+        int M_ratio = -1;
+        stage4_matching_gpu(ws.d_descA, 2, ws.d_descB, 2, ws.d_matches, ws.d_nmatches, 0.75f);
+        CHECK_CUDA(cudaMemcpy(&M_ratio, ws.d_nmatches, sizeof(int), cudaMemcpyDeviceToHost));
+        TEST_ASSERT(M_ratio == 1, "Ratio test boundary must accept A[1] and reject A[0]");
+
+        Match res_m;
+        CHECK_CUDA(cudaMemcpy(&res_m, ws.d_matches, sizeof(Match), cudaMemcpyDeviceToHost));
+        TEST_ASSERT(res_m.idx_a == 1 && res_m.idx_b == 0 && res_m.dist == 14, "Accepted match parameters must match exact values");
+        std::cout << "  -> Test 6.4 (Lowe's ratio test strict boundary condition): PASS\n";
+    }
+
+    // Test 6.5: Ascending order contract of idx_a
+    {
+        const int N = 100;
+        std::vector<Descriptor> h_descA(N), h_descB(N);
+        std::memset(h_descA.data(), 0, N * sizeof(Descriptor));
+        std::memset(h_descB.data(), 0, N * sizeof(Descriptor));
+
+        // Chỉ các chỉ số chẵn i = 0, 2, 4... có match với B[i] (dist=0, các điểm khác dist=100)
+        for (int i = 0; i < N; i++) {
+            h_descB[i].words[0] = (static_cast<uint32_t>(i) + 1) * 0x11111111u;
+            if (i % 2 == 0) {
+                h_descA[i] = h_descB[i]; // Khớp chính xác dist=0
+            } else {
+                h_descA[i].words[0] = 0xAAAAAAAAu;
+                h_descA[i].words[1] = 0x55555555u; // Hoàn toàn khác
+            }
+        }
+
+        CHECK_CUDA(cudaMemcpy(ws.d_descA, h_descA.data(), N * sizeof(Descriptor), cudaMemcpyHostToDevice));
+        CHECK_CUDA(cudaMemcpy(ws.d_descB, h_descB.data(), N * sizeof(Descriptor), cudaMemcpyHostToDevice));
+
+        int M_order = 0;
+        stage4_matching_gpu(ws.d_descA, N, ws.d_descB, N, ws.d_matches, ws.d_nmatches, RATIO_THRESH);
+        CHECK_CUDA(cudaMemcpy(&M_order, ws.d_nmatches, sizeof(int), cudaMemcpyDeviceToHost));
+        TEST_ASSERT(M_order == N / 2, "Expected N/2 even matches");
+
+        std::vector<Match> h_matches(M_order);
+        CHECK_CUDA(cudaMemcpy(h_matches.data(), ws.d_matches, M_order * sizeof(Match), cudaMemcpyDeviceToHost));
+
+        for (int k = 0; k < M_order; k++) {
+            TEST_ASSERT(h_matches[k].idx_a == k * 2, "Match output must be strictly sorted by idx_a ascending");
+            TEST_ASSERT(h_matches[k].idx_b == k * 2, "Match idx_b must match corresponding B index");
+            TEST_ASSERT(h_matches[k].dist == 0, "Distance must be 0 for exact match");
+        }
+        std::cout << "  -> Test 6.5 (Strict ascending order of idx_a verified across " << M_order << " matches): PASS\n";
+    }
+
+    // Test 6.6: CPU vs GPU 100% equivalence on pseudo-random descriptors
+    {
+        const int nA = 150, nB = 250;
+        std::vector<Descriptor> h_descA(nA), h_descB(nB);
+        LcgRngCpu rng(12345);
+
+        for (int i = 0; i < nA; i++) {
+            for (int k = 0; k < 8; k++) h_descA[i].words[k] = rng.next();
+        }
+        for (int j = 0; j < nB; j++) {
+            for (int k = 0; k < 8; k++) h_descB[j].words[k] = rng.next();
+        }
+        // Gieo một số cặp trùng khớp có chủ đích
+        for (int i = 0; i < 30; i++) {
+            h_descB[i * 5] = h_descA[i * 3];
+        }
+
+        // Chạy CPU
+        float t_cpu = 0.0f;
+        std::vector<Match> cpu_matches = stage4_matching_cpu(h_descA, h_descB, t_cpu);
+
+        // Chạy GPU
+        CHECK_CUDA(cudaMemcpy(ws.d_descA, h_descA.data(), nA * sizeof(Descriptor), cudaMemcpyHostToDevice));
+        CHECK_CUDA(cudaMemcpy(ws.d_descB, h_descB.data(), nB * sizeof(Descriptor), cudaMemcpyHostToDevice));
+
+        int gpu_nmatches = 0;
+        stage4_matching_gpu(ws.d_descA, nA, ws.d_descB, nB, ws.d_matches, ws.d_nmatches, RATIO_THRESH);
+        CHECK_CUDA(cudaMemcpy(&gpu_nmatches, ws.d_nmatches, sizeof(int), cudaMemcpyDeviceToHost));
+
+        TEST_ASSERT(gpu_nmatches == static_cast<int>(cpu_matches.size()),
+                    "GPU match count must be 100% identical to CPU reference");
+
+        std::vector<Match> gpu_matches(gpu_nmatches);
+        if (gpu_nmatches > 0) {
+            CHECK_CUDA(cudaMemcpy(gpu_matches.data(), ws.d_matches, gpu_nmatches * sizeof(Match), cudaMemcpyDeviceToHost));
+        }
+
+        for (int k = 0; k < gpu_nmatches; k++) {
+            TEST_ASSERT(gpu_matches[k].idx_a == cpu_matches[k].idx_a, "Match idx_a mismatch");
+            TEST_ASSERT(gpu_matches[k].idx_b == cpu_matches[k].idx_b, "Match idx_b mismatch");
+            TEST_ASSERT(gpu_matches[k].dist  == cpu_matches[k].dist,  "Match dist mismatch");
+        }
+        std::cout << "  -> Test 6.6 (CPU vs GPU 100% equivalence on " << gpu_nmatches << " matches): PASS\n";
+    }
+}
+
+// ============================================================================
+// TEST SUITE 7: Stage 6 CUDA Correctness (Tuấn phụ trách — Plan v4 Mục 18.4)
+// Kiểm thử: Identity warp, Translation warp, Bilinear sampling, Feathering blend
+// và Validity mask contract.
+// ============================================================================
+void test_stage6_cuda_correctness() {
+    std::cout << "[Test 7] Testing Stage 6 (Warping, Bilinear Sampling & Blending GPU)...\n";
+
+    const int w = 128, h = 128;
+    CudaWorkspace ws;
+    ws.allocate(w, h);
+
+    // Chuẩn bị 2 ảnh mẫu có gradient
+    Image imgA(w, h), imgB(w, h);
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            uint8_t valA = static_cast<uint8_t>((x * 255) / w);
+            uint8_t valB = static_cast<uint8_t>((y * 255) / h);
+            imgA.data[y * w + x] = make_uchar4(valA, 50, 100, 255);
+            imgB.data[y * w + x] = make_uchar4(100, valB, 50, 255);
+        }
+    }
+
+    CHECK_CUDA(cudaMemcpy(ws.d_imgA, imgA.data, w * h * sizeof(uchar4), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(ws.d_imgB, imgB.data, w * h * sizeof(uchar4), cudaMemcpyHostToDevice));
+
+    // Test 7.1: Identity Warp (H = Identity)
+    {
+        Homography H_id; // Mặc định là identity
+        CanvasBounds bounds;
+        bounds.x_min = 0; bounds.y_min = 0;
+        bounds.x_max = w; bounds.y_max = h;
+        bounds.width = w; bounds.height = h;
+        bounds.total_pixels = static_cast<size_t>(w) * h;
+        bounds.is_valid = true;
+
+        float el_warp = stage6_warp_blend_gpu(
+            ws.d_imgA, ws.d_imgB, w, h, H_id, bounds, ws.d_pano, ws.d_pano_mask);
+        TEST_ASSERT(el_warp >= 0.0f, "Stage 6 kernel execution time must be >= 0");
+
+        std::vector<uchar4> h_pano(bounds.total_pixels);
+        std::vector<uint8_t> h_mask(bounds.total_pixels);
+        CHECK_CUDA(cudaMemcpy(h_pano.data(), ws.d_pano, bounds.total_pixels * sizeof(uchar4), cudaMemcpyDeviceToHost));
+        CHECK_CUDA(cudaMemcpy(h_mask.data(), ws.d_pano_mask, bounds.total_pixels * sizeof(uint8_t), cudaMemcpyDeviceToHost));
+
+        for (size_t i = 0; i < bounds.total_pixels; i++) {
+            TEST_ASSERT(h_mask[i] == 1, "Mask must be 1 for fully covered canvas");
+            TEST_ASSERT(h_pano[i].w == 255, "Alpha channel must be 255 for valid pixel");
+        }
+        std::cout << "  -> Test 7.1 (Identity warp pixel coverage & alpha contract): PASS\n";
+    }
+
+    // Test 7.2: Feathering blend equivalence vs CPU stage6_warp_blend_cpu
+    {
+        Homography H_trans;
+        H_trans.h[2] = -30.0f; // Dịch sang trái 30 px
+        H_trans.h[5] = -10.0f; // Dịch lên trên 10 px
+        H_trans.is_valid = true;
+
+        CanvasBounds bounds = compute_canvas_bounds(w, h, w, h, H_trans);
+        TEST_ASSERT(bounds.is_valid && bounds.total_pixels <= ws.pano_capacity, "Canvas bounds must be valid");
+
+        // CPU run
+        bool cpu_ok = false;
+        float t_cpu = 0.0f;
+        Image cpu_pano = stage6_warp_blend_cpu(imgA, imgB, H_trans, cpu_ok, t_cpu);
+        TEST_ASSERT(cpu_ok && !cpu_pano.empty(), "CPU warp must succeed");
+
+        // GPU run
+        float t_gpu = stage6_warp_blend_gpu(
+            ws.d_imgA, ws.d_imgB, w, h, H_trans, bounds, ws.d_pano, ws.d_pano_mask);
+        TEST_ASSERT(t_gpu >= 0.0f, "GPU warp time must be non-negative");
+
+        std::vector<uchar4> gpu_pano(bounds.total_pixels);
+        CHECK_CUDA(cudaMemcpy(gpu_pano.data(), ws.d_pano, bounds.total_pixels * sizeof(uchar4), cudaMemcpyDeviceToHost));
+
+        // So sánh từng pixel giữa CPU và GPU: max absolute difference <= 1 LSB
+        int max_diff = 0;
+        for (int y = 0; y < bounds.height; y++) {
+            for (int x = 0; x < bounds.width; x++) {
+                int idx = y * bounds.width + x;
+                uchar4 cp = cpu_pano.data[idx];
+                uchar4 gp = gpu_pano[idx];
+                int diff_r = std::abs(static_cast<int>(cp.x) - static_cast<int>(gp.x));
+                int diff_g = std::abs(static_cast<int>(cp.y) - static_cast<int>(gp.y));
+                int diff_b = std::abs(static_cast<int>(cp.z) - static_cast<int>(gp.z));
+                int diff_a = std::abs(static_cast<int>(cp.w) - static_cast<int>(gp.w));
+                max_diff = std::max({max_diff, diff_r, diff_g, diff_b, diff_a});
+            }
+        }
+        TEST_ASSERT(max_diff <= 1, "GPU feathering/bilinear output must match CPU within 1 LSB");
+        std::cout << "  -> Test 7.2 (Feathering blend vs CPU equivalence, max diff = " << max_diff << " LSB <= 1): PASS\n";
+    }
+
+    // Test 7.3: Validity mask contract (0 for background, 1 for image)
+    {
+        Homography H_large_trans;
+        H_large_trans.h[2] = 50.0f; // Dịch B sang phải 50 px
+        H_large_trans.h[5] = 50.0f; // Dịch B xuống dưới 50 px
+        H_large_trans.is_valid = true;
+
+        CanvasBounds bounds = compute_canvas_bounds(w, h, w, h, H_large_trans);
+        TEST_ASSERT(bounds.is_valid, "Canvas bounds must be valid");
+
+        stage6_warp_blend_gpu(ws.d_imgA, ws.d_imgB, w, h, H_large_trans, bounds, ws.d_pano, ws.d_pano_mask);
+
+        std::vector<uchar4> gpu_pano(bounds.total_pixels);
+        std::vector<uint8_t> gpu_mask(bounds.total_pixels);
+        CHECK_CUDA(cudaMemcpy(gpu_pano.data(), ws.d_pano, bounds.total_pixels * sizeof(uchar4), cudaMemcpyDeviceToHost));
+        CHECK_CUDA(cudaMemcpy(gpu_mask.data(), ws.d_pano_mask, bounds.total_pixels * sizeof(uint8_t), cudaMemcpyDeviceToHost));
+
+        for (int cy = 0; cy < bounds.height; cy++) {
+            for (int cx = 0; cx < bounds.width; cx++) {
+                int idx = cy * bounds.width + cx;
+                if (gpu_mask[idx] == 0) {
+                    TEST_ASSERT(gpu_pano[idx].x == 0 && gpu_pano[idx].y == 0 &&
+                                gpu_pano[idx].z == 0 && gpu_pano[idx].w == 0,
+                                "Background pixel outside valid mask must be (0,0,0,0)");
+                } else {
+                    TEST_ASSERT(gpu_pano[idx].w == 255, "Valid pixel must have alpha=255");
+                }
+            }
+        }
+        std::cout << "  -> Test 7.3 (Validity mask strictly separates canvas foreground/background): PASS\n";
+    }
+}
+
+// ============================================================================
 // MAIN RUNNER
+
 // ============================================================================
 int main() {
     std::cout << "==============================================================================\n";
@@ -780,11 +1083,13 @@ int main() {
     test_stage1_cuda_correctness();
     test_ransac_sampling_production_path();
     test_stage5_cuda_correctness();
+    test_stage4_cuda_correctness();
+    test_stage6_cuda_correctness();
 
     std::cout << "==============================================================================\n";
+    std::cout << "[TUAN_HANDOFF_READY] Tất cả unit tests cho phần việc của Tuấn (Stage 4 & Stage 6) đã PASS!\n";
     std::cout << "[THONG_HANDOFF_READY] Tất cả unit tests cho phần việc của Thông (S1, S5, WS, Bounds) đã PASS!\n";
-    std::cout << "[CHÚ THÍCH GATE G1]: Trạng thái này chứng minh phần Thông sẵn sàng bàn giao;\n";
-    std::cout << "                     Gate G1 toàn diện sẽ do Tiến (S2/S3) và Tuấn (S4/S6) hoàn tất.\n";
+    std::cout << "[CHÚ THÍCH GATE G1]: Stage 1, 2, 4, 5, 6 thuần CUDA đã hoàn tất; đang chờ Stage 3 của Tiến.\n";
     std::cout << "==============================================================================\n";
     return 0;
 }

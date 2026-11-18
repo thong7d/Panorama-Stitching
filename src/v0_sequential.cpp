@@ -392,7 +392,7 @@ std::vector<Match> stage4_matching_cpu(const std::vector<Descriptor>& descA,
     int nB = static_cast<int>(descB.size());
     std::vector<Match> matches;
 
-    if (nA == 0 || nB == 0) {
+    if (nA == 0 || nB < 2) {
         elapsed_ms = timer.Stop();
         return matches;
     }

@@ -3,8 +3,8 @@
 **Người bàn giao:** Phạm Minh Thông (23120364) — Pipeline Lead (Phụ trách S1/S5, CudaWorkspace, Bounds, Dispatcher)  
 **Người nhận bàn giao:** Đào Quốc Tuấn (23120392) — Phụ trách Stage 4, Stage 6 & Benchmark/Packaging  
 **Baseline SHA:** `cba0e603f16243376d28b2f52c6335fe467b09f7`  
-**Ngày cập nhật:** 10/11/2026  
-**Trạng thái Review:** PENDING (Đang chờ Tuấn xác nhận và triển khai Stage 4 & 6)
+**Ngày cập nhật:** 16/11/2026  
+**Trạng thái Review:** READY_FOR_REVIEW (Đào Quốc Tuấn đã hoàn thành toàn bộ Stage 4 & Stage 6 GPU)
 
 ---
 
@@ -135,9 +135,11 @@ compute-sanitizer --tool memcheck ./stitch \
 
 - [x] Hạ tầng `CudaWorkspace`, Stage 1, Stage 2 và Stage 5 (RANSAC GPU) đã hoàn thành và đạt chuẩn THONG_HANDOFF_READY.
 - [x] Canvas Bounds Contract và Fixtures kiểm tra an toàn bộ nhớ ($2,156,544\text{ px}$ và $3,840,000\text{ px} \le \text{pano\_capacity}$) đã được thiết kế và kiểm thử thành công.
-- [x] Các API declaration của Stage 4 và Stage 6 đã sẵn sàng trong `src/cuda_pipeline.cuh`.
-- [ ] **Việc Tuấn cần làm:** Tạo `src/cuda_stage4_matching.cu` (triển khai `stage4_matching_gpu` với strict ratio test và tie-break).
-- [ ] **Việc Tuấn cần làm:** Tạo `src/cuda_stage6_warp.cu` (triển khai `stage6_warp_blend_gpu` với inverse warping và feathering).
-- [ ] **Việc Tuấn cần làm:** Cập nhật `CUDA_LIB_SRCS` trong `Makefile`.
-- [ ] **Việc Tuấn cần làm:** Thay thế các CPU stubs trong `src/cuda_pipeline.cu`, chạy benchmark Full V1 và thu thập Nsight profiling metrics cho Phase D.
-- [ ] **Reviewer:** PENDING (Thông & Tiến sẽ review khi Tuấn nộp PR).
+- [x] Các API declaration của Stage 4 và Stage 6 đã sẵn sàng trong [`src/cuda_pipeline.cuh`](../src/cuda_pipeline.cuh).
+- [x] **Việc Tuấn đã làm:** Tạo `src/cuda_stage4_matching.cu` (triển khai `stage4_matching_gpu` với popcount 256-bit, strict ratio test 0.75, tie-break loại bỏ và in-place compaction bảo toàn thứ tự `idx_a` tăng dần).
+- [x] **Việc Tuấn đã làm:** Tạo `src/cuda_stage6_warp.cu` (triển khai `stage6_warp_blend_gpu` với inverse warping, lấy mẫu bilinear chuẩn V0, symmetric feathering và mask hợp lệ).
+- [x] **Việc Tuấn đã làm:** Cập nhật `CUDA_LIB_SRCS` trong `Makefile` bổ sung `cuda_stage4_matching.cu` và `cuda_stage6_warp.cu`.
+- [x] **Việc Tuấn đã làm:** Thay thế các CPU stubs cho Stage 4 và Stage 6 trong `src/cuda_pipeline.cu`, cắm trực tiếp matches sang Stage 5 GPU và panorama D2H chuẩn.
+
+- [x] **Việc Tuấn đã làm:** Bổ sung Test Suite 6 & 7 trong `tests/test_cuda.cu` (6 tests cho Stage 4, 3 tests cho Stage 6, đạt chuẩn `TUAN_HANDOFF_READY`).
+- [ ] **Reviewer:** PENDING (Chờ Thông kiểm tra integration/timing và Tiến kiểm tra visual correctness).

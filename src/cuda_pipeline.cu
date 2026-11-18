@@ -455,7 +455,7 @@ static StageMetric make_timing_entry(const std::vector<float>& runs) {
 PipelineResult run_v1_basic_cuda(const Image& imgA, const Image& imgB, int runs) {
     PipelineResult result;
     result.version_str = "V1";
-    result.optimization_str = "V1 Hybrid Scaffold (S1+S2+S5 GPU, S3+S4+S6 CPU Stub - NOT Full V1 Benchmark)";
+    result.optimization_str = "V1 Scaffold (S1+S2+S4+S5+S6 GPU, S3 CPU Stub awaiting Tien)";
     result.runs = runs;
     result.warmups = 1;
     result.image_width = imgA.w;
@@ -592,52 +592,52 @@ PipelineResult run_v1_basic_cuda(const Image& imgA, const Image& imgB, int runs)
             t_s3  = s3_timer.Stop();
         }
 
+        // [DEBUG BRIDGE: S3 CPU Stub -> S4 GPU (Giai đoạn chuyển tiếp)]
+        // Sao chép descriptors từ host lên GPU để Stage 4 chạy thuần trên GPU
+        ctrl_timer.Start();
+        if (nkpA > 0) CHECK_CUDA(cudaMemcpy(ws.d_descA, descA.data(), nkpA * sizeof(Descriptor), cudaMemcpyHostToDevice));
+        if (nkpB > 0) CHECK_CUDA(cudaMemcpy(ws.d_descB, descB.data(), nkpB * sizeof(Descriptor), cudaMemcpyHostToDevice));
+        float t_ctrl_s3_s4 = ctrl_timer.Stop();
+        t_ctrl_s2_s3 += t_ctrl_s3_s4;
+
         // ================================================================
-        // Stage 4: Hamming Matching — CPU STUB
-        // TODO(Tuấn): Thay bằng stage4_matching_gpu()
+        // Stage 4: Hamming Matching — GPU (Tuấn phụ trách)
+        // Kết quả ghi trực tiếp vào ws.d_matches và ws.d_nmatches trên device
         // ================================================================
-        float t_s4 = 0.0f;
-        std::vector<Match> matches;
-        {
-            matches = stage4_matching_cpu(descA, descB, t_s4);
-        }
+        float t_s4 = stage4_matching_gpu(
+            ws.d_descA, nkpA,
+            ws.d_descB, nkpB,
+            ws.d_matches, ws.d_nmatches,
+            RATIO_THRESH);
+
+        int n_matches = 0;
+        CHECK_CUDA(cudaMemcpy(&n_matches, ws.d_nmatches, sizeof(int), cudaMemcpyDeviceToHost));
 
         // ================================================================
         // Stage 5: RANSAC Homography — GPU (Thông phụ trách - Plan v4 Mục 18.2)
+        // ws.d_matches đã nằm sẵn trên GPU, không cần copy từ host
         // ================================================================
         float t_s5 = 0.0f;
         Homography best_H{};
         int inliers = 0;
-        bool homo_ok = false;
-        {
-            ctrl_timer.Start();
-            int n_matches = static_cast<int>(matches.size());
-            if (n_matches > 0) {
-                CHECK_CUDA(cudaMemcpy(ws.d_matches, matches.data(), n_matches * sizeof(Match), cudaMemcpyHostToDevice));
-            }
-            CHECK_CUDA(cudaMemcpy(ws.d_nmatches, &n_matches, sizeof(int), cudaMemcpyHostToDevice));
-            float t_ctrl_s4_s5 = ctrl_timer.Stop();
-            t_ctrl_s2_s3 += t_ctrl_s4_s5;
-
-            homo_ok = stage5_ransac_gpu(
-                ws.d_matches, n_matches, ws.d_kpA, ws.d_kpB,
-                ws, w, h, best_H, inliers, t_s5);
-        }
+        bool homo_ok = stage5_ransac_gpu(
+            ws.d_matches, n_matches, ws.d_kpA, ws.d_kpB,
+            ws, w, h, best_H, inliers, t_s5);
 
         // Điền diagnostics và đánh giá trạng thái đúng chuẩn V0 (Plan v4 Section 18.2)
         diag.keypoints_a  = nkpA;
         diag.keypoints_b  = nkpB;
-        diag.matches      = static_cast<int>(matches.size());
+        diag.matches      = n_matches;
         diag.inliers      = inliers;
-        diag.inlier_ratio = (matches.size() > 0)
-                            ? static_cast<float>(inliers) / matches.size()
+        diag.inlier_ratio = (n_matches > 0)
+                            ? static_cast<float>(inliers) / static_cast<float>(n_matches)
                             : 0.0f;
         diag.H = best_H;
 
         if (!homo_ok || inliers < 4) {
             diag.status  = PipelineStatus::FAILURE;
             diag.warning = "RANSAC failed: less than 4 inliers or singular system";
-        } else if (inliers < std::max(12, static_cast<int>(0.15f * matches.size()))) {
+        } else if (inliers < std::max(12, static_cast<int>(0.15f * n_matches))) {
             diag.status  = PipelineStatus::LOW_CONFIDENCE;
             diag.warning = best_H.used_translation_fallback
                 ? "Unstable homography rejected; translation fallback has low consensus"
@@ -651,10 +651,11 @@ PipelineResult run_v1_basic_cuda(const Image& imgA, const Image& imgB, int runs)
         }
 
         // ================================================================
-        // Stage 6: Warp + Blend (CPU STUB trong bản scaffold)
+        // Stage 6: Warp + Blend — GPU (Tuấn phụ trách)
         // Kiểm tra hợp lệ hình học của Canvas Bounds trước khi warp
         // ================================================================
         float t_s6 = 0.0f;
+        float t_d2h = 0.0f;
         bool warp_ok = false;
         if (diag.status != PipelineStatus::FAILURE) {
             CanvasBounds bounds = compute_canvas_bounds(w, h, w, h, best_H);
@@ -665,17 +666,18 @@ PipelineResult run_v1_basic_cuda(const Image& imgA, const Image& imgB, int runs)
                 diag.status  = PipelineStatus::FAILURE;
                 diag.warning = "Canvas bounds validation failed: total pixels exceed preallocated workspace capacity";
             } else {
-                // [STUB] Gọi V0 CPU warp+blend
-                out_pano = stage6_warp_blend_cpu(imgA, imgB, best_H, warp_ok, t_s6);
-                if (!warp_ok) {
-                    diag.status  = PipelineStatus::FAILURE;
-                    diag.warning = "Warping and blending failed: invalid canvas or interpolation error";
-                }
+                t_s6 = stage6_warp_blend_gpu(
+                    ws.d_imgA, ws.d_imgB, w, h, best_H, bounds, ws.d_pano, ws.d_pano_mask);
+
+                // D2H: Chuyển ảnh panorama từ GPU về host
+                out_pano.allocate(bounds.width, bounds.height);
+                GpuTimer d2h_timer;
+                d2h_timer.Start();
+                CHECK_CUDA(cudaMemcpy(out_pano.data, ws.d_pano, bounds.total_pixels * sizeof(uchar4), cudaMemcpyDeviceToHost));
+                t_d2h = d2h_timer.Stop();
+                warp_ok = true;
             }
         }
-
-        // D2H: trong bản scaffold hybrid, panorama được tạo bởi CPU stub nên không có D2H thực sự
-        float t_d2h = 0.0f;
 
         float t_e2e = e2e_timer.Stop();
 
@@ -721,9 +723,9 @@ PipelineResult run_v1_basic_cuda(const Image& imgA, const Image& imgB, int runs)
             any_failure = true;
             failure_warning = run_diag.warning;
         }
-        std::printf("[V1 Run %d/%d] S1(GPU): %.2f ms | S2(GPU): %.2f ms | S5(GPU): %.2f ms | Status: %s\n",
+        std::printf("[V1 Run %d/%d] S1(GPU): %.2f ms | S2(GPU): %.2f ms | S4(GPU): %.2f ms | S5(GPU): %.2f ms | S6(GPU): %.2f ms | D2H: %.2f ms | Status: %s\n",
                     r + 1, runs,
-                    t_s1.back(), t_s2.back(), t_s5.back(),
+                    t_s1.back(), t_s2.back(), t_s4.back(), t_s5.back(), t_s6.back(), t_d2h.back(),
                     status_to_string(run_diag.status));
     }
 
